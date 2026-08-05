@@ -15,7 +15,7 @@ loaderVersion="${loader_version_range}" #mandatory
 license="${mod_license}"
 
 # A URL to refer people to when problems occur with this mod
-#issueTrackerURL="https://change.me.to.your.issue.tracker.example.invalid/" #optional
+#issueTrackerURL="https://github.com/charybdis180/Ethos/issues" #optional
 
 # A list of mods - how many allowed here is determined by the individual mod loader
 [[mods]] #mandatory
@@ -42,11 +42,15 @@ displayName="${mod_name}" #mandatory
 #credits="" #optional
 
 # The authors of the mod, displayed in the mod UI (optional)
-#authors=""
+authors="charybdis180"
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-Example mod description.
+Vanilla livestock finally act like animals.
+
+Sheep, cows, pigs, and chickens form herds, graze and drink on their own schedule, sleep through the night, and react to weather, threats, and the people who feed them. Hand-feeding builds familiarity; troughs and chicken feeders support pens.
+
+Next up: horses, donkeys, and mules — plus richer predator behavior for wolves and foxes. Long-term goal: every passive mob.
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
