@@ -1,0 +1,37 @@
+{
+  "variants": {
+    "facing=north,fill=empty,part=center": { "model": "ethological:block/trough", "y": 90 },
+    "facing=south,fill=empty,part=center": { "model": "ethological:block/trough", "y": 270 },
+    "facing=east,fill=empty,part=center": { "model": "ethological:block/trough", "y": 180 },
+    "facing=west,fill=empty,part=center": { "model": "ethological:block/trough" },
+    "facing=north,fill=barely,part=center": { "model": "ethological:block/trough_barely", "y": 90 },
+    "facing=south,fill=barely,part=center": { "model": "ethological:block/trough_barely", "y": 270 },
+    "facing=east,fill=barely,part=center": { "model": "ethological:block/trough_barely", "y": 180 },
+    "facing=west,fill=barely,part=center": { "model": "ethological:block/trough_barely" },
+    "facing=north,fill=half,part=center": { "model": "ethological:block/trough_half", "y": 90 },
+    "facing=south,fill=half,part=center": { "model": "ethological:block/trough_half", "y": 270 },
+    "facing=east,fill=half,part=center": { "model": "ethological:block/trough_half", "y": 180 },
+    "facing=west,fill=half,part=center": { "model": "ethological:block/trough_half" },
+    "facing=north,fill=full,part=center": { "model": "ethological:block/trough_full", "y": 90 },
+    "facing=south,fill=full,part=center": { "model": "ethological:block/trough_full", "y": 270 },
+    "facing=east,fill=full,part=center": { "model": "ethological:block/trough_full", "y": 180 },
+    "facing=west,fill=full,part=center": { "model": "ethological:block/trough_full" },
+
+    "facing=north,fill=empty,part=side": { "model": "ethological:block/trough_side" },
+    "facing=south,fill=empty,part=side": { "model": "ethological:block/trough_side" },
+    "facing=east,fill=empty,part=side": { "model": "ethological:block/trough_side" },
+    "facing=west,fill=empty,part=side": { "model": "ethological:block/trough_side" },
+    "facing=north,fill=barely,part=side": { "model": "ethological:block/trough_side" },
+    "facing=south,fill=barely,part=side": { "model": "ethological:block/trough_side" },
+    "facing=east,fill=barely,part=side": { "model": "ethological:block/trough_side" },
+    "facing=west,fill=barely,part=side": { "model": "ethological:block/trough_side" },
+    "facing=north,fill=half,part=side": { "model": "ethological:block/trough_side" },
+    "facing=south,fill=half,part=side": { "model": "ethological:block/trough_side" },
+    "facing=east,fill=half,part=side": { "model": "ethological:block/trough_side" },
+    "facing=west,fill=half,part=side": { "model": "ethological:block/trough_side" },
+    "facing=north,fill=full,part=side": { "model": "ethological:block/trough_side" },
+    "facing=south,fill=full,part=side": { "model": "ethological:block/trough_side" },
+    "facing=east,fill=full,part=side": { "model": "ethological:block/trough_side" },
+    "facing=west,fill=full,part=side": { "model": "ethological:block/trough_side" }
+  }
+}

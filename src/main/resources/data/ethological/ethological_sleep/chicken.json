@@ -1,0 +1,7 @@
+{
+    "entity":  "minecraft:chicken",
+    "sleep_start_tick":  13000,
+    "sleep_end_tick":  23000,
+    "regen_amplifier":  0,
+    "max_bedtime_delay_ticks":  800
+}

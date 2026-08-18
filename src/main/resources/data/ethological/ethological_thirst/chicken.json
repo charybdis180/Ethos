@@ -1,0 +1,11 @@
+{
+    "entity":  "minecraft:chicken",
+    "max_thirst":  8,
+    "depletion_interval_ticks":  2000,
+    "deplete_while_sleeping":  false,
+    "dehydrate_damage_interval_ticks":  700,
+    "dehydrate_damage":  1,
+    "drink_ticks":  40,
+    "evening_drink_lead_ticks":  1000,
+    "urgent_drink_threshold":  2
+}

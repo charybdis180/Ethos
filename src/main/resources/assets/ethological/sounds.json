@@ -1,0 +1,34 @@
+{
+  "entity.sheep.eat": {
+    "sounds": [
+      { "name": "minecraft:random/eat1" },
+      { "name": "minecraft:random/eat2" },
+      { "name": "minecraft:random/eat3" }
+    ],
+    "subtitle": "subtitles.ethological.entity.sheep.eat"
+  },
+  "entity.cow.eat": {
+    "sounds": [
+      { "name": "minecraft:random/eat1" },
+      { "name": "minecraft:random/eat2" },
+      { "name": "minecraft:random/eat3" }
+    ],
+    "subtitle": "subtitles.ethological.entity.cow.eat"
+  },
+  "entity.pig.eat": {
+    "sounds": [
+      { "name": "minecraft:random/eat1" },
+      { "name": "minecraft:random/eat2" },
+      { "name": "minecraft:random/eat3" }
+    ],
+    "subtitle": "subtitles.ethological.entity.pig.eat"
+  },
+  "entity.chicken.eat": {
+    "sounds": [
+      { "name": "minecraft:random/eat1" },
+      { "name": "minecraft:random/eat2" },
+      { "name": "minecraft:random/eat3" }
+    ],
+    "subtitle": "subtitles.ethological.entity.chicken.eat"
+  }
+}

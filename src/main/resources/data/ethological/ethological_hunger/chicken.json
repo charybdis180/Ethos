@@ -1,0 +1,28 @@
+{
+    "entity":  "minecraft:chicken",
+    "max_hunger":  8,
+    "depletion_interval_ticks":  2000,
+    "starve_damage_interval_ticks":  1000,
+    "starve_damage":  1,
+    "eat_cooldown_ticks":  0,
+    "hunger_per_food":  1,
+    "heal_per_food":  1,
+    "deplete_while_sleeping":  false,
+    "search_threshold_percent":  1,
+    "eats_per_patch":  4,
+    "patch_graze_radius":  5,
+    "patch_search_radius":  20,
+    "graze_linger_ticks_min":  20,
+    "graze_linger_ticks_span":  20,
+    "sheared_depletion_multiplier":  1,
+    "hand_feed_multiplier":  2,
+    "feeder_multiplier":  3,
+    "crop_multiplier":  3,
+    "food_blocks":  [
+                        "minecraft:grass_block",
+                        "minecraft:short_grass",
+                        "minecraft:tall_grass",
+                        "minecraft:wheat",
+                        "minecraft:beetroots"
+                    ]
+}

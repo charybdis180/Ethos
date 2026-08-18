@@ -1,0 +1,7 @@
+{
+  "credit": "Invisible support block for the trough's side cells; the center renders the full three-block model",
+  "textures": {
+    "particle": "ethological:block/trough"
+  },
+  "elements": []
+}

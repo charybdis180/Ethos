@@ -1,0 +1,16 @@
+{
+    "entity":  "minecraft:sheep",
+    "max_size":  12,
+    "join_radius":  20,
+    "follow_distance":  8,
+    "sleep_follow_multiplier":  1.0,
+    "mother_follow_distance":  3,
+    "follow_spread_per_member_percent":  0.08,
+    "follow_style":  "surround",
+    "cross_species_alert_radius":  20,
+    "resatter_distance":  12,
+    "spawn_group_min":  6,
+    "spawn_group_max":  12,
+    "spawn_babies_min":  0,
+    "spawn_babies_max":  2
+}

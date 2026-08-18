@@ -1,0 +1,10 @@
+{
+    "entity":  "minecraft:pig",
+    "water_search_radius":  128,
+    "wander_radius":  40,
+    "leash_shrink_ticks":  1000,
+    "validation_interval_ticks":  200,
+    "nomadic":  false,
+    "migration_speed":  1.0,
+    "camp_time_tick":  9500
+}

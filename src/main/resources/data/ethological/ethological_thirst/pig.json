@@ -1,0 +1,11 @@
+{
+    "entity":  "minecraft:pig",
+    "max_thirst":  10,
+    "depletion_interval_ticks":  2400,
+    "deplete_while_sleeping":  false,
+    "dehydrate_damage_interval_ticks":  800,
+    "dehydrate_damage":  1,
+    "drink_ticks":  60,
+    "evening_drink_lead_ticks":  1000,
+    "urgent_drink_threshold":  2
+}

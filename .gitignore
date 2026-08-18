@@ -38,3 +38,7 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Local scratch / logs ###
+debug-*.log
+_tools/*.txt

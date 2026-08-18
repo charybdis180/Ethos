@@ -1,0 +1,29 @@
+{
+    "entity":  "minecraft:cow",
+    "max_hunger":  12,
+    "depletion_interval_ticks":  2400,
+    "starve_damage_interval_ticks":  1200,
+    "starve_damage":  1,
+    "eat_cooldown_ticks":  0,
+    "hunger_per_food":  1,
+    "heal_per_food":  2,
+    "deplete_while_sleeping":  true,
+    "search_threshold_percent":  1,
+    "eats_per_patch":  2,
+    "patch_graze_radius":  10,
+    "patch_search_radius":  40,
+    "graze_linger_ticks_min":  50,
+    "graze_linger_ticks_span":  50,
+    "sheared_depletion_multiplier":  1,
+    "hand_feed_multiplier":  2,
+    "feeder_multiplier":  3,
+    "crop_multiplier":  3,
+    "food_blocks":  [
+                        "minecraft:grass_block",
+                        "minecraft:short_grass",
+                        "minecraft:tall_grass",
+                        "minecraft:wheat",
+                        "minecraft:fern",
+                        "minecraft:large_fern"
+                    ]
+}

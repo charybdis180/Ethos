@@ -1,0 +1,16 @@
+{
+    "entity":  "minecraft:cow",
+    "max_size":  20,
+    "join_radius":  32,
+    "follow_distance":  6,
+    "sleep_follow_multiplier":  1.0,
+    "mother_follow_distance":  3,
+    "follow_spread_per_member_percent":  0.08,
+    "follow_style":  "follow",
+    "cross_species_alert_radius":  14,
+    "resatter_distance":  16,
+    "spawn_group_min":  10,
+    "spawn_group_max":  20,
+    "spawn_babies_min":  0,
+    "spawn_babies_max":  3
+}

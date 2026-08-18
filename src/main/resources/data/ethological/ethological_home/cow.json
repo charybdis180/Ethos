@@ -1,0 +1,10 @@
+{
+    "entity":  "minecraft:cow",
+    "water_search_radius":  128,
+    "wander_radius":  80,
+    "leash_shrink_ticks":  1000,
+    "validation_interval_ticks":  200,
+    "nomadic":  true,
+    "migration_speed":  0.8,
+    "camp_time_tick":  9500
+}

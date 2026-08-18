@@ -1,0 +1,28 @@
+{
+    "entity":  "minecraft:pig",
+    "max_hunger":  10,
+    "depletion_interval_ticks":  2400,
+    "starve_damage_interval_ticks":  1200,
+    "starve_damage":  1,
+    "eat_cooldown_ticks":  0,
+    "hunger_per_food":  1,
+    "heal_per_food":  2,
+    "deplete_while_sleeping":  false,
+    "search_threshold_percent":  1,
+    "eats_per_patch":  3,
+    "patch_graze_radius":  6,
+    "patch_search_radius":  24,
+    "graze_linger_ticks_min":  30,
+    "graze_linger_ticks_span":  30,
+    "sheared_depletion_multiplier":  1,
+    "hand_feed_multiplier":  2,
+    "feeder_multiplier":  3,
+    "crop_multiplier":  3,
+    "food_blocks":  [
+                        "minecraft:carrots",
+                        "minecraft:potatoes",
+                        "minecraft:beetroots",
+                        "minecraft:short_grass",
+                        "minecraft:tall_grass"
+                    ]
+}
