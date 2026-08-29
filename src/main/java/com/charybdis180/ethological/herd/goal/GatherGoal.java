@@ -1,18 +1,6 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.herd.goal;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import java.util.EnumSet;
@@ -46,10 +34,10 @@ extends Goal {
         Animal alphaAnimal;
         block9: {
             block8: {
-                if (!this.gathering() || !this.mob.hasData(HerdAttachments.HERD_DATA)) {
+                if (!this.gathering() || !this.mob.hasData(ModAttachments.HERD_DATA)) {
                     return false;
                 }
-                if (((HerdData)this.mob.getData(HerdAttachments.HERD_DATA)).alpha()) {
+                if (((HerdData)this.mob.getData(ModAttachments.HERD_DATA)).alpha()) {
                     return false;
                 }
                 Level level = this.mob.level();
@@ -57,7 +45,7 @@ extends Goal {
                     return false;
                 }
                 ServerLevel serverLevel = (ServerLevel)level;
-                HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(HerdAttachments.HERD_DATA)).herdId());
+                HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(ModAttachments.HERD_DATA)).herdId());
                 if (herd == null || herd.alphaId == null) {
                     return false;
                 }

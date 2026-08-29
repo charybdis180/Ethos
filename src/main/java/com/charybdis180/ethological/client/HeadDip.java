@@ -1,13 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.util.Mth
- *  net.minecraft.world.entity.LivingEntity
- */
 package com.charybdis180.ethological.client;
 
-import com.charybdis180.ethological.thirst.ThirstAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
+
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 
@@ -19,10 +13,10 @@ public final class HeadDip {
     }
 
     public static float remaining(LivingEntity entity, float partialTick) {
-        if (!entity.hasData(ThirstAttachments.HEAD_DIP_UNTIL)) {
+        if (!entity.hasData(ModAttachments.HEAD_DIP_UNTIL)) {
             return 0.0f;
         }
-        long until = (Long)entity.getData(ThirstAttachments.HEAD_DIP_UNTIL);
+        long until = (Long)entity.getData(ModAttachments.HEAD_DIP_UNTIL);
         long now = entity.level().getGameTime();
         float left = (float)(until - now) - partialTick;
         return Math.max(0.0f, Math.min(40.0f, left));

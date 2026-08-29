@@ -1,28 +1,12 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.AgeableMob
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.herd;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.Ethological;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.MotherData;
-import com.charybdis180.ethological.home.HomeAttachments;
 import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.hunger.FoodTargetData;
-import com.charybdis180.ethological.hunger.HungerAttachments;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
+import com.charybdis180.ethological.thirst.Thirst;
 import com.charybdis180.ethological.thirst.WaterTargetData;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -156,37 +140,61 @@ public final class HerdManager {
 
     public static PanicPhase panicPhaseOf(Animal animal, long gameTime) {
         Level level;
-        if (!animal.hasData(HerdAttachments.HERD_DATA) || !((level = animal.level()) instanceof ServerLevel)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA) || !((level = animal.level()) instanceof ServerLevel)) {
             return PanicPhase.NONE;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)animal.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)animal.getData(ModAttachments.HERD_DATA)).herdId());
         return herd != null ? herd.phaseAt(serverLevel, gameTime, animal) : PanicPhase.NONE;
     }
 
     /** The herd this animal belongs to, or null when un-herded / unresolvable. */
     public static Herd herdOf(Animal animal) {
-        if (!animal.hasData(HerdAttachments.HERD_DATA)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA)) {
             return null;
         }
-        return HerdManager.get(animal.getData(HerdAttachments.HERD_DATA).herdId());
+        return HerdManager.get(animal.getData(ModAttachments.HERD_DATA).herdId());
     }
 
-    public static Set<BlockPos> waterTargetsOfHerdMates(Animal self) {
-        Level level;
-        if (!self.hasData(HerdAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
+    /**
+     * True when any loaded, alive adult herd-mate (excluding {@code self}) is urgently thirsty.
+     * Cheap by construction: iterates the herd's member UUID list and reads an attachment per
+     * member; callers throttle it so a large herd pays this at most every few seconds.
+     */
+    public static boolean hasDehydratingMate(Animal self) {
+        if (!(self.level() instanceof ServerLevel serverLevel) || !self.hasData(ModAttachments.HERD_DATA)) {
+            return false;
+        }
+        HerdManager.Herd herd = HerdManager.get(self.getData(ModAttachments.HERD_DATA).herdId());
+        if (herd == null) {
+            return false;
+        }
+        for (UUID id : herd.members) {
+            if (id.equals(self.getUUID())) {
+                continue;
+            }
+            Entity entity = serverLevel.getEntity(id);
+            if (entity instanceof Animal mate && mate.isAlive() && !mate.isBaby() && Thirst.isUrgentlyThirsty(mate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static Set<BlockPos> waterTargetsOfHerdMates(Animal self) {        Level level;
+        if (!self.hasData(ModAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
             return Set.of();
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)self.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)self.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return Set.of();
         }
         Set<BlockPos> claims = herd.waterClaims(serverLevel, serverLevel.getGameTime());
-        if (!self.hasData(ThirstAttachments.WATER_TARGET)) {
+        if (!self.hasData(ModAttachments.WATER_TARGET)) {
             return claims;
         }
-        BlockPos mine = ((WaterTargetData)self.getData(ThirstAttachments.WATER_TARGET)).pos();
+        BlockPos mine = ((WaterTargetData)self.getData(ModAttachments.WATER_TARGET)).pos();
         if (!claims.contains(mine)) {
             return claims;
         }
@@ -197,11 +205,11 @@ public final class HerdManager {
 
     public static Set<BlockPos> drinkStandsOfHerdMates(Animal self) {
         Level level;
-        if (!self.hasData(HerdAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
+        if (!self.hasData(ModAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
             return Set.of();
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)self.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)self.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return Set.of();
         }
@@ -209,16 +217,43 @@ public final class HerdManager {
         if (claims.contains(self.blockPosition())) {
             HashSet<BlockPos> filtered = new HashSet<BlockPos>(claims);
             filtered.remove(self.blockPosition());
-            if (self.hasData(ThirstAttachments.WATER_TARGET)) {
-                filtered.remove(((WaterTargetData)self.getData(ThirstAttachments.WATER_TARGET)).shore());
+            if (self.hasData(ModAttachments.WATER_TARGET)) {
+                filtered.remove(((WaterTargetData)self.getData(ModAttachments.WATER_TARGET)).shore());
             }
             return filtered;
         }
         return claims;
     }
 
+    /** Number of loaded herd mates (excluding {@code self}) whose WATER_TARGET sits on
+     *  {@code water}. Cheap O(members) scan used by the drink-lane gate; called only when a
+     *  member is already drink-due, so no memoization is warranted. */
+    public static int activeDrinkersOnWater(Animal self, BlockPos water) {
+        Level level;
+        if (!self.hasData(ModAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
+            return 0;
+        }
+        ServerLevel serverLevel = (ServerLevel)level;
+        Herd herd = HerdManager.get(((HerdData)self.getData(ModAttachments.HERD_DATA)).herdId());
+        if (herd == null) {
+            return 0;
+        }
+        int count = 0;
+        for (UUID memberId : herd.members) {
+            if (memberId.equals(self.getUUID())) {
+                continue;
+            }
+            Entity member = serverLevel.getEntity(memberId);
+            if (member instanceof Animal mate && mate.hasData(ModAttachments.WATER_TARGET)
+                    && ((WaterTargetData)mate.getData(ModAttachments.WATER_TARGET)).pos().equals(water)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     public static void propagateHomeFromAlpha(Animal alpha, Optional<HomeData> home) {
-        if (!alpha.hasData(HerdAttachments.HERD_DATA) || !((HerdData)alpha.getData(HerdAttachments.HERD_DATA)).alpha()) {
+        if (!alpha.hasData(ModAttachments.HERD_DATA) || !((HerdData)alpha.getData(ModAttachments.HERD_DATA)).alpha()) {
             return;
         }
         Level level = alpha.level();
@@ -226,7 +261,7 @@ public final class HerdManager {
             return;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)alpha.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)alpha.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return;
         }
@@ -235,28 +270,28 @@ public final class HerdManager {
             if (memberId.equals(alpha.getUUID()) || !((member = serverLevel.getEntity(memberId)) instanceof Animal)) continue;
             Animal mate = (Animal)member;
             if (home.isPresent()) {
-                mate.setData(HomeAttachments.HOME,home.get());
+                mate.setData(ModAttachments.HOME,home.get());
                 continue;
             }
-            mate.removeData(HomeAttachments.HOME);
+            mate.removeData(ModAttachments.HOME);
         }
     }
 
     public static Set<BlockPos> foodTargetsOfHerdMates(Animal self) {
         Level level;
-        if (!self.hasData(HerdAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
+        if (!self.hasData(ModAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
             return Set.of();
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)self.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)self.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return Set.of();
         }
         Set<BlockPos> claims = herd.foodClaims(serverLevel, serverLevel.getGameTime());
-        if (!self.hasData(HungerAttachments.FOOD_TARGET)) {
+        if (!self.hasData(ModAttachments.FOOD_TARGET)) {
             return claims;
         }
-        BlockPos mine = ((FoodTargetData)self.getData(HungerAttachments.FOOD_TARGET)).pos();
+        BlockPos mine = ((FoodTargetData)self.getData(ModAttachments.FOOD_TARGET)).pos();
         if (!claims.contains(mine) && !claims.contains(mine.above())) {
             return claims;
         }
@@ -269,11 +304,11 @@ public final class HerdManager {
     /** Snapshot of the positions of herd mates that currently have a food target; used to hoist per-candidate herd iteration out of block scans. */
     public static List<Vec3> positionsOfFeedingHerdMates(Animal self) {
         Level level;
-        if (!self.hasData(HerdAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
+        if (!self.hasData(ModAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
             return List.of();
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)self.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)self.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return List.of();
         }
@@ -281,7 +316,7 @@ public final class HerdManager {
         for (UUID memberId : herd.members) {
             Animal mate;
             Entity member;
-            if (memberId.equals(self.getUUID()) || !((member = serverLevel.getEntity(memberId)) instanceof Animal) || !(mate = (Animal)member).hasData(HungerAttachments.FOOD_TARGET)) continue;
+            if (memberId.equals(self.getUUID()) || !((member = serverLevel.getEntity(memberId)) instanceof Animal) || !(mate = (Animal)member).hasData(ModAttachments.FOOD_TARGET)) continue;
             positions.add(mate.position());
         }
         return positions;
@@ -289,20 +324,20 @@ public final class HerdManager {
 
     public static boolean isMateTooCloseToStand(Animal self, BlockPos stand, double minDist) {
         Level level;
-        if (!self.hasData(HerdAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
+        if (!self.hasData(ModAttachments.HERD_DATA) || !((level = self.level()) instanceof ServerLevel)) {
             return false;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Herd herd = HerdManager.get(((HerdData)self.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)self.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return false;
         }
         double minSqr = minDist * minDist;
-        Vec3 standCenter = Vec3.atCenterOf((Vec3i)stand);
+        Vec3 standCenter = Vec3.atCenterOf(stand);
         for (UUID memberId : herd.members) {
             Animal mate;
             Entity member;
-            if (memberId.equals(self.getUUID()) || !((member = serverLevel.getEntity(memberId)) instanceof Animal) || !(mate = (Animal)member).hasData(HungerAttachments.FOOD_TARGET) || !(mate.distanceToSqr(standCenter) < minSqr)) continue;
+            if (memberId.equals(self.getUUID()) || !((member = serverLevel.getEntity(memberId)) instanceof Animal) || !(mate = (Animal)member).hasData(ModAttachments.FOOD_TARGET) || !(mate.distanceToSqr(standCenter) < minSqr)) continue;
             return true;
         }
         return false;
@@ -355,8 +390,8 @@ public final class HerdManager {
         }
         Animal alphaAnimal = (Animal)alpha;
         if (!alphaAnimal.isAlive()
-                || !alphaAnimal.hasData(HerdAttachments.HERD_DATA)
-                || !((HerdData)alphaAnimal.getData(HerdAttachments.HERD_DATA)).herdId().equals(herd.id)) {
+                || !alphaAnimal.hasData(ModAttachments.HERD_DATA)
+                || !((HerdData)alphaAnimal.getData(ModAttachments.HERD_DATA)).herdId().equals(herd.id)) {
             return false;
         }
         // A baby holding the alpha seat is not a valid alpha once any adult is in the herd.
@@ -372,10 +407,10 @@ public final class HerdManager {
     }
 
     public static void onMemberDied(ServerLevel level, Animal dead) {
-        if (!dead.hasData(HerdAttachments.HERD_DATA)) {
+        if (!dead.hasData(ModAttachments.HERD_DATA)) {
             return;
         }
-        Herd herd = HerdManager.get(((HerdData)dead.getData(HerdAttachments.HERD_DATA)).herdId());
+        Herd herd = HerdManager.get(((HerdData)dead.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return;
         }
@@ -414,8 +449,8 @@ public final class HerdManager {
                 continue;
             }
             Animal animal = (Animal)entity;
-            if (!animal.hasData(HerdAttachments.HERD_DATA)
-                    || !((HerdData)animal.getData(HerdAttachments.HERD_DATA)).herdId().equals(herd.id)) {
+            if (!animal.hasData(ModAttachments.HERD_DATA)
+                    || !((HerdData)animal.getData(ModAttachments.HERD_DATA)).herdId().equals(herd.id)) {
                 it.remove();
                 membersRemoved = true;
                 continue;
@@ -434,8 +469,8 @@ public final class HerdManager {
         if (alpha instanceof Animal) {
             Animal alphaAnimal = (Animal)alpha;
             alphaLoadedInvalid = !alphaAnimal.isAlive()
-                    || !alphaAnimal.hasData(HerdAttachments.HERD_DATA)
-                    || !((HerdData)alphaAnimal.getData(HerdAttachments.HERD_DATA)).herdId().equals(herd.id)
+                    || !alphaAnimal.hasData(ModAttachments.HERD_DATA)
+                    || !((HerdData)alphaAnimal.getData(ModAttachments.HERD_DATA)).herdId().equals(herd.id)
                     || alphaAnimal.isBaby() && loadedAdults > 0;
         }
         boolean alphaMissing = herd.alphaId == null || alpha == null && loadedAdults > 0;
@@ -455,7 +490,10 @@ public final class HerdManager {
         if (alphaChanged || membersRemoved) {
             HerdManager.syncAlphaFlags(level, herd);
         }
-        if (loadedAdults + unloaded > maxSize) {
+        // Pen herds (formed inside an enclosure by escape-driven secession) are exempt from
+        // the over-cap split: the whole point of a pen herd is that a large fenced population
+        // stays cohesive. The flag is cleared by HerdEvents when the enclosure opens.
+        if (loadedAdults + unloaded > maxSize && !herd.penHerd) {
             HerdManager.split(level, herd, maxSize);
         }
     }
@@ -503,11 +541,22 @@ public final class HerdManager {
         for (UUID id : herd.members) {
             Animal animal;
             Entity entity = level.getEntity(id);
-            if (!(entity instanceof Animal) || !(animal = (Animal)entity).hasData(HerdAttachments.HERD_DATA)) continue;
+            if (!(entity instanceof Animal) || !(animal = (Animal)entity).hasData(ModAttachments.HERD_DATA)) continue;
             // Babies must never carry the alpha flag, even if electAlpha had no adult choice.
             boolean shouldBeAlpha = id.equals(herd.alphaId) && !animal.isBaby();
-            if (((HerdData)animal.getData(HerdAttachments.HERD_DATA)).alpha() == shouldBeAlpha) continue;
-            animal.setData(HerdAttachments.HERD_DATA,new HerdData(herd.id, shouldBeAlpha));
+            if (((HerdData)animal.getData(ModAttachments.HERD_DATA)).alpha() == shouldBeAlpha) continue;
+            animal.setData(ModAttachments.HERD_DATA,new HerdData(herd.id, shouldBeAlpha));
+        }
+    }
+
+    /** Detaches one animal from its herd: clears the attachment and removes the membership
+     *  entry. Used by escape-driven secession before the animal joins/forms its pen herd. */
+    public static void removeFromHerd(ServerLevel level, Animal animal, Herd herd) {
+        herd.members.remove(animal.getUUID());
+        animal.removeData(ModAttachments.HERD_DATA);
+        if (animal.getUUID().equals(herd.alphaId)) {
+            herd.alphaId = HerdManager.electAlpha(level, herd.members);
+            HerdManager.syncAlphaFlags(level, herd);
         }
     }
 
@@ -537,7 +586,7 @@ public final class HerdManager {
         }
         LinkedHashSet<UUID> moving = new LinkedHashSet<UUID>(candidates);
         for (UUID id2 : absorbed.members) {
-            if (moving.contains(id2) || !((entity = level.getEntity(id2)) instanceof Animal) || !(animal = (Animal)entity).isBaby() || !animal.hasData(HerdAttachments.MOTHER) || !moving.contains(((MotherData)animal.getData(HerdAttachments.MOTHER)).motherId())) continue;
+            if (moving.contains(id2) || !((entity = level.getEntity(id2)) instanceof Animal) || !(animal = (Animal)entity).isBaby() || !animal.hasData(ModAttachments.MOTHER) || !moving.contains(((MotherData)animal.getData(ModAttachments.MOTHER)).motherId())) continue;
             moving.add(id2);
         }
         for (UUID id2 : moving) {
@@ -546,7 +595,7 @@ public final class HerdManager {
             entity = level.getEntity(id2);
             if (!(entity instanceof Animal)) continue;
             animal = (Animal)entity;
-            animal.setData(HerdAttachments.HERD_DATA,new HerdData(survivor.id, false));
+            animal.setData(ModAttachments.HERD_DATA,new HerdData(survivor.id, false));
         }
         if (absorbed.members.isEmpty()) {
             HERDS.remove(absorbed.id);
@@ -597,7 +646,7 @@ public final class HerdManager {
             return;
         }
         for (UUID id2 : sorted) {
-            if (departingSet.contains(id2) || !((entity = level.getEntity(id2)) instanceof Animal) || !(animal = (Animal)entity).isBaby() || !animal.hasData(HerdAttachments.MOTHER) || !departingSet.contains(((MotherData)animal.getData(HerdAttachments.MOTHER)).motherId())) continue;
+            if (departingSet.contains(id2) || !((entity = level.getEntity(id2)) instanceof Animal) || !(animal = (Animal)entity).isBaby() || !animal.hasData(ModAttachments.MOTHER) || !departingSet.contains(((MotherData)animal.getData(ModAttachments.MOTHER)).motherId())) continue;
             departing.add(id2);
             departingSet.add(id2);
         }
@@ -609,7 +658,7 @@ public final class HerdManager {
             Entity entity2 = level.getEntity(id3);
             if (!(entity2 instanceof Animal)) continue;
             Animal animal2 = (Animal)entity2;
-            animal2.setData(HerdAttachments.HERD_DATA,new HerdData(newHerd.id, id3.equals(newAlphaId)));
+            animal2.setData(ModAttachments.HERD_DATA,new HerdData(newHerd.id, id3.equals(newAlphaId)));
         }
         HerdManager.syncAlphaFlags(level, herd);
         Ethological.LOGGER.debug("Ethological: herd {} peeled to {} \u2014 new herd {} with {} members", new Object[]{herd.id, herd.members.size(), newHerd.id, newHerd.members.size()});
@@ -619,6 +668,10 @@ public final class HerdManager {
         public final UUID id;
         public final Set<UUID> members = new LinkedHashSet<UUID>();
         public UUID alphaId;
+        /** True when this herd was formed/marked inside an enclosure (escape-driven secession
+         *  or a penned alpha). Pen herds are exempt from the over-cap split and cap-gated
+         *  joins/merges; HerdEvents clears the flag once FenceDetection reports the pen open. */
+        public boolean penHerd;
         /** Shared validated follow route (surface stands) toward the alpha; null when unused. */
         public List<BlockPos> followRoute;
         /** Game time when {@link #followRoute} was last shared. */
@@ -650,10 +703,16 @@ public final class HerdManager {
         private long foodClaimsStamp = Long.MIN_VALUE;
         private static final long CLAIM_MEMO_TICKS = 20L;
         /** Sleep spots each member is actively settling toward; used so settling members
-         *  avoid columns already being walked to by herd-mates. Stale claims are dropped by
-         *  the getter, and every stop() clears the owner's entry. */
-        private final Map<UUID, BlockPos> sleepSpotClaims = new HashMap<UUID, BlockPos>();
+         *  avoid columns already being walked to by herd-mates. Claims are stamped with the
+         *  game time they were written; the getter drops entries older than
+         *  {@link #SLEEP_CLAIM_TTL_TICKS} so a crashed/interrupted settle cannot block a good
+         *  spot indefinitely, and every stop() still clears the owner's entry immediately. */
+        private final Map<UUID, SleepClaim> sleepSpotClaims = new HashMap<UUID, SleepClaim>();
         private static final long SLEEP_CLAIM_TTL_TICKS = 600L;
+
+        /** A settle target plus the game time it was claimed, for TTL enforcement. */
+        private record SleepClaim(BlockPos pos, long stamp) {
+        }
 
         /** Freshness windows for the shared water result. */
         public static final long WATER_CACHE_TTL_TICKS = 600L;
@@ -710,8 +769,8 @@ public final class HerdManager {
                 HashSet<BlockPos> claims = new HashSet<BlockPos>();
                 for (UUID memberId : this.members) {
                     Entity member = level.getEntity(memberId);
-                    if (member instanceof Animal mate && mate.hasData(ThirstAttachments.WATER_TARGET)) {
-                        claims.add(((WaterTargetData)mate.getData(ThirstAttachments.WATER_TARGET)).pos());
+                    if (member instanceof Animal mate && mate.hasData(ModAttachments.WATER_TARGET)) {
+                        claims.add(((WaterTargetData)mate.getData(ModAttachments.WATER_TARGET)).pos());
                     }
                 }
                 this.cachedWaterClaims = java.util.Set.copyOf(claims);
@@ -730,8 +789,8 @@ public final class HerdManager {
                         continue;
                     }
                     claims.add(mate.blockPosition());
-                    if (mate.hasData(ThirstAttachments.WATER_TARGET)) {
-                        claims.add(((WaterTargetData)mate.getData(ThirstAttachments.WATER_TARGET)).shore());
+                    if (mate.hasData(ModAttachments.WATER_TARGET)) {
+                        claims.add(((WaterTargetData)mate.getData(ModAttachments.WATER_TARGET)).shore());
                     }
                 }
                 this.cachedDrinkStandClaims = java.util.Set.copyOf(claims);
@@ -746,8 +805,8 @@ public final class HerdManager {
                 HashSet<BlockPos> claims = new HashSet<BlockPos>();
                 for (UUID memberId : this.members) {
                     Entity member = level.getEntity(memberId);
-                    if (member instanceof Animal mate && mate.hasData(HungerAttachments.FOOD_TARGET)) {
-                        BlockPos stand = ((FoodTargetData)mate.getData(HungerAttachments.FOOD_TARGET)).pos();
+                    if (member instanceof Animal mate && mate.hasData(ModAttachments.FOOD_TARGET)) {
+                        BlockPos stand = ((FoodTargetData)mate.getData(ModAttachments.FOOD_TARGET)).pos();
                         claims.add(stand);
                         claims.add(stand.above());
                     }
@@ -764,7 +823,7 @@ public final class HerdManager {
                 this.sleepSpotClaims.remove(memberId);
                 return;
             }
-            this.sleepSpotClaims.put(memberId, pos.immutable());
+            this.sleepSpotClaims.put(memberId, new SleepClaim(pos.immutable(), now));
         }
 
         /** Removes a member's pending sleep spot claim (called when the settling walk ends). */
@@ -775,17 +834,18 @@ public final class HerdManager {
         /** Spots other members are actively settling toward; stale claims are dropped. */
         public Set<BlockPos> sleepSpotClaimsOf(Animal self, long now) {
             HashSet<BlockPos> spots = new HashSet<BlockPos>();
-            Iterator<Map.Entry<UUID, BlockPos>> it = this.sleepSpotClaims.entrySet().iterator();
+            Iterator<Map.Entry<UUID, SleepClaim>> it = this.sleepSpotClaims.entrySet().iterator();
             while (it.hasNext()) {
-                Map.Entry<UUID, BlockPos> entry = it.next();
-                if (entry.getValue() == null) {
+                Map.Entry<UUID, SleepClaim> entry = it.next();
+                SleepClaim claim = entry.getValue();
+                if (claim == null || now - claim.stamp() > SLEEP_CLAIM_TTL_TICKS) {
                     it.remove();
                     continue;
                 }
                 if (entry.getKey().equals(self.getUUID())) {
                     continue;
                 }
-                spots.add(entry.getValue());
+                spots.add(claim.pos());
             }
             return spots;
         }

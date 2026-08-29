@@ -1,11 +1,13 @@
 package com.charybdis180.ethological.herd.goal;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
+import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.util.FleePathing;
 import com.charybdis180.ethological.util.Personality;
 import java.util.EnumSet;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.PathfinderMob;
@@ -67,7 +69,7 @@ public class ScatterGoal extends Goal {
         Vec3 stream = this.nearestScatterMateStream();
         if (threat != null) {
             Path path = FleePathing.beelineAway(
-                    (PathfinderMob)this.mob, threat.position(), FLEE_DISTANCE, 4, stream);
+                    this.mob, threat.position(), FLEE_DISTANCE, 4, stream);
             if (path != null) {
                 this.mob.getNavigation().moveTo(path, this.speed());
                 return;
@@ -82,9 +84,17 @@ public class ScatterGoal extends Goal {
                 return;
             }
         }
-        Vec3 target = DefaultRandomPos.getPos((PathfinderMob)this.mob, 10, 5);
+        Vec3 target = DefaultRandomPos.getPos(this.mob, 10, 5);
         if (target != null) {
-            this.mob.getNavigation().moveTo(target.x, target.y, target.z, this.speed());
+            BlockPos anchored = Homes.surfaceStandForMove(this.mob.level(), BlockPos.containing(target), this.mob);
+            if (anchored == null) {
+                // The random pos is already a validated RandomPos stand; without a reachable
+                // surface stand fall back to the raw point rather than freezing mid-flee.
+                this.mob.getNavigation().moveTo(target.x, target.y, target.z, this.speed());
+                return;
+            }
+            anchored = Homes.offsetStandFromCorners(this.mob.level(), anchored);
+            this.mob.getNavigation().moveTo(anchored.getX() + 0.5, anchored.getY(), anchored.getZ() + 0.5, this.speed());
         }
     }
 
@@ -94,10 +104,10 @@ public class ScatterGoal extends Goal {
 
     @Nullable
     private Vec3 nearestScatterMateStream() {
-        if (!this.mob.hasData(HerdAttachments.HERD_DATA) || !(this.mob.level() instanceof ServerLevel level)) {
+        if (!this.mob.hasData(ModAttachments.HERD_DATA) || !(this.mob.level() instanceof ServerLevel level)) {
             return null;
         }
-        HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
         if (herd == null) {
             return null;
         }
@@ -132,10 +142,10 @@ public class ScatterGoal extends Goal {
     }
 
     private Entity resolveThreat() {
-        if (!this.mob.hasData(HerdAttachments.HERD_DATA) || !(this.mob.level() instanceof ServerLevel serverLevel)) {
+        if (!this.mob.hasData(ModAttachments.HERD_DATA) || !(this.mob.level() instanceof ServerLevel serverLevel)) {
             return null;
         }
-        HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
         if (herd == null || herd.threatId() == null) {
             return null;
         }

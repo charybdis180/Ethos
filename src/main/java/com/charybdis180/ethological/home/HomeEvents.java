@@ -1,29 +1,9 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.server.packs.resources.PreparableReloadListener
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.RandomStrollGoal
- *  net.minecraft.world.entity.ai.goal.WrappedGoal
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.LevelReader
- *  net.minecraft.world.level.pathfinder.PathType
- *  net.minecraft.world.phys.Vec3
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.AddReloadListenerEvent
- *  net.neoforged.neoforge.event.entity.EntityJoinLevelEvent
- *  net.neoforged.neoforge.event.tick.EntityTickEvent$Post
- */
 package com.charybdis180.ethological.home;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.Ethological;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.home.FenceDetection;
-import com.charybdis180.ethological.home.HomeAttachments;
 import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.home.HomeSettingsManager;
 import com.charybdis180.ethological.home.Homes;
@@ -32,7 +12,6 @@ import com.charybdis180.ethological.home.goal.BoundedStrollGoal;
 import com.charybdis180.ethological.home.goal.MigrateGoal;
 import com.charybdis180.ethological.home.goal.ReturnHomeGoal;
 import com.charybdis180.ethological.hunger.GrazePatches;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
 import java.util.Optional;
@@ -60,7 +39,7 @@ public final class HomeEvents {
 
     @SubscribeEvent
     public static void onAddReloadListeners(AddReloadListenerEvent event) {
-        event.addListener((PreparableReloadListener)new HomeSettingsManager());
+        event.addListener(new HomeSettingsManager());
     }
 
     @SubscribeEvent
@@ -147,13 +126,13 @@ public final class HomeEvents {
         // A sleeping animal is stationary — running the fence flood-fill and escape
         // pathfinder probes for it is pure waste (single probes cost up to ~140ms).
         // Skip all home validation until it wakes up.
-        if (((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        if (animal.getData(ModAttachments.SLEEPING)) {
             return;
         }
         if (com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "home_leash", now, 40L) && Homes.effectiveHome(animal).isPresent() && (sleepSettings = SleepSettingsManager.get(animal.getType())).isPresent()) {
             float radius = (float)Homes.allowedRadius(animal, settings, animal.level().getDayTime(), sleepSettings.get().sleepStartTick());
-            if (Math.abs(((Float)animal.getData(HomeAttachments.LEASH_RADIUS)).floatValue() - radius) >= 0.5f) {
-                animal.setData(HomeAttachments.LEASH_RADIUS,Float.valueOf(radius));
+            if (Math.abs(((Float)animal.getData(ModAttachments.LEASH_RADIUS)).floatValue() - radius) >= 0.5f) {
+                animal.setData(ModAttachments.LEASH_RADIUS,Float.valueOf(radius));
             }
         }
         if (!Homes.isHomeOwner(animal)) {
@@ -161,7 +140,7 @@ public final class HomeEvents {
         }
         Optional<BlockPos> ownHome = Homes.homeOf((Entity)animal);
         if (ownHome.isPresent() && com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "home_shelter", now, 40L)) {
-            boolean temporary = animal.hasData(HomeAttachments.HOME) && ((HomeData)animal.getData(HomeAttachments.HOME)).temporary();
+            boolean temporary = animal.hasData(ModAttachments.HOME) && ((HomeData)animal.getData(ModAttachments.HOME)).temporary();
             HomeEvents.tryNightlyShelterUpgrade(animal, settings, ownHome.get(), temporary);
             ownHome = Homes.homeOf((Entity)animal);
         }
@@ -180,7 +159,7 @@ public final class HomeEvents {
             // flags the current basin as enclosed (a natural ditch is not a real pen), so
             // a stale temporary camp can still be broken after sleep ends instead of
             // freezing the alpha in place forever.
-            if (ownHome.isPresent() && !((HomeData) animal.getData(HomeAttachments.HOME)).temporary()) {
+            if (ownHome.isPresent() && !((HomeData) animal.getData(ModAttachments.HOME)).temporary()) {
                 BlockPos stale = ownHome.get();
                 HomeEvents.clearHome(animal);
                 ownHome = Optional.empty();
@@ -204,7 +183,7 @@ public final class HomeEvents {
             }
             return;
         }
-        if (((HomeData)animal.getData(HomeAttachments.HOME)).temporary()) {
+        if (((HomeData)animal.getData(ModAttachments.HOME)).temporary()) {
             boolean sleepTime = SleepSettingsManager.get(animal.getType()).map(s -> s.isSleepTime(animal.level().getDayTime())).orElse(false);
             if (sleepTime) {
                 return;
@@ -238,7 +217,7 @@ public final class HomeEvents {
             return;
         }
         double rehomeDistance = (double)settings.wanderRadius() * 1.5;
-        if (animal.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)ownHome.get()))) > rehomeDistance * rehomeDistance) {
+        if (animal.distanceToSqr(Vec3.atCenterOf(((Vec3i)ownHome.get()))) > rehomeDistance * rehomeDistance) {
             BlockPos current = animal.blockPosition();
             BlockPos homePos = ownHome.get();
             int chebyshev = Math.max(Math.abs(current.getX() - homePos.getX()), Math.abs(current.getZ() - homePos.getZ()));
@@ -304,7 +283,7 @@ public final class HomeEvents {
             }
             return;
         }
-        if (((HomeData)animal.getData(HomeAttachments.HOME)).temporary()) {
+        if (((HomeData)animal.getData(ModAttachments.HOME)).temporary()) {
             // A camp set during campTime must hold through the night so the shrinking
             // pre-sleep circle can gather the herd; break camp only after sleep ends.
             // "Night over" is everything OUTSIDE [campTime, sleepEnd): with the old
@@ -321,12 +300,12 @@ public final class HomeEvents {
     }
 
     private static void setHome(Animal animal, HomeData home) {
-        animal.setData(HomeAttachments.HOME,home);
+        animal.setData(ModAttachments.HOME,home);
         HerdManager.propagateHomeFromAlpha(animal, Optional.of(home));
     }
 
     private static void clearHome(Animal animal) {
-        animal.removeData(HomeAttachments.HOME);
+        animal.removeData(ModAttachments.HOME);
         HerdManager.propagateHomeFromAlpha(animal, Optional.empty());
     }
 }

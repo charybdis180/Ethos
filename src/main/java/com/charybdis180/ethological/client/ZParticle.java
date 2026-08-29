@@ -1,15 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.multiplayer.ClientLevel
- *  net.minecraft.client.particle.Particle
- *  net.minecraft.client.particle.ParticleProvider
- *  net.minecraft.client.particle.ParticleRenderType
- *  net.minecraft.client.particle.SpriteSet
- *  net.minecraft.client.particle.TextureSheetParticle
- *  net.minecraft.core.particles.SimpleParticleType
- */
 package com.charybdis180.ethological.client;
 
 import net.minecraft.client.multiplayer.ClientLevel;

@@ -1,22 +1,8 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.block.Block
- *  net.minecraft.world.level.block.Blocks
- *  net.minecraft.world.level.block.CropBlock
- *  net.minecraft.world.level.block.state.BlockState
- */
 package com.charybdis180.ethological.trample;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.hunger.FoodTargetData;
-import com.charybdis180.ethological.hunger.HungerAttachments;
 import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -93,10 +79,10 @@ extends Goal {
     }
 
     private boolean isFoodTarget(BlockPos cropPos) {
-        if (!this.mob.hasData(HungerAttachments.FOOD_TARGET)) {
+        if (!this.mob.hasData(ModAttachments.FOOD_TARGET)) {
             return false;
         }
-        BlockPos target = ((FoodTargetData)this.mob.getData(HungerAttachments.FOOD_TARGET)).pos();
+        BlockPos target = ((FoodTargetData)this.mob.getData(ModAttachments.FOOD_TARGET)).pos();
         return cropPos.equals(target) || cropPos.equals((Object)target.above());
     }
 }

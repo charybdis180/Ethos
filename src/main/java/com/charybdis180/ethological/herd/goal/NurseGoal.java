@@ -1,7 +1,7 @@
 package com.charybdis180.ethological.herd.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.config.EthologicalConfig;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.MotherData;
 import com.charybdis180.ethological.hunger.Hunger;
 import com.charybdis180.ethological.social.SocialCalm;
@@ -109,7 +109,7 @@ public class NurseGoal extends Goal {
         if (this.repathCooldown > 0) {
             --this.repathCooldown;
         } else {
-            this.baby.getNavigation().moveTo((Entity)this.mother, SPEED);
+            this.baby.getNavigation().moveTo(this.mother, SPEED);
             this.repathCooldown = REPATH_TICKS;
         }
     }
@@ -122,10 +122,10 @@ public class NurseGoal extends Goal {
     }
 
     private Animal resolveMother() {
-        if (!this.baby.hasData(HerdAttachments.MOTHER)) {
+        if (!this.baby.hasData(ModAttachments.MOTHER)) {
             return null;
         }
-        MotherData link = this.baby.getData(HerdAttachments.MOTHER);
+        MotherData link = this.baby.getData(ModAttachments.MOTHER);
         Level level = this.baby.level();
         if (!(level instanceof ServerLevel serverLevel) || !link.isActive(serverLevel.getGameTime())) {
             return null;

@@ -1,27 +1,16 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.herd.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.FollowStyle;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
+import com.charybdis180.ethological.herd.HerdEvents;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
 import com.charybdis180.ethological.herd.SpeciesHerdSettings;
+import com.charybdis180.ethological.home.FenceDetection;
+import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.hunger.HungerAttachments;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
 import java.util.ArrayList;
@@ -29,6 +18,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
@@ -84,6 +74,25 @@ extends Goal {
     private double lastBlockedAlphaX;
     private double lastBlockedAlphaZ;
     private long lastBlockedGameTime = Long.MIN_VALUE;
+    /** Watchdog: member XZ and game time of the last real horizontal movement. */
+    private double lastProgressX;
+    private double lastProgressZ;
+    private long lastProgressGameTime;
+    /** Release state: while {@code now < releasedUntilGameTime} this goal stays inactive so
+     *  idle goals (stroll/rest) take over instead of a frozen follow. */
+    private long releasedUntilGameTime = Long.MIN_VALUE;
+    /** Alpha XZ when the goal was released, for the "alpha moved away" resume trigger. */
+    private double alphaPosAtReleaseX;
+    private double alphaPosAtReleaseZ;
+    /** No horizontal progress for this long triggers one escalation (memo/target clear + forced repath). */
+    private static final int STUCK_ESCALATE_TICKS = 300;
+    /** Still no progress at this point (cumulative) releases the goal temporarily. */
+    private static final int STUCK_RELEASE_TICKS = 600;
+    /** How long a released goal stays dormant before it may re-engage on its own. */
+    private static final int RELEASE_COOLDOWN_MIN = 400;
+    private static final int RELEASE_COOLDOWN_SPAN = 400;
+    /** Alpha travel (squared) that wakes a released member early: "the herd is moving". */
+    private static final double RELEASE_RESUME_MOVE_SQR = 16.0;
 
     public FollowAlphaGoal(Animal mob) {
         this.mob = mob;
@@ -94,15 +103,103 @@ extends Goal {
         return HerdSettingsManager.get(this.mob.getType()).orElse(null);
     }
 
+    /** Follow radius, widened by the shared {@link FollowPathing#ALPHA_DOWN_RELAXATION} while
+     *  the alpha is down (asleep or resting), so members near a sleeping herd settle instead of
+     *  endlessly probing ring stations they cannot reach. Wary/panic behavior keeps the strict
+     *  radius. The SAME factor widens the sleep-entry gate (FollowPathing.herdRestRadius), so a
+     *  member released here is always allowed to fall asleep where it stands. */
+    private double settleRadius(Animal alphaAnimal, SpeciesHerdSettings settings, double follow) {
+        if (this.wary || alphaAnimal == null) {
+            return follow;
+        }
+        boolean alphaDown = alphaAnimal.getData(ModAttachments.SLEEPING)
+                || alphaAnimal.getData(ModAttachments.RESTING);
+        return alphaDown ? follow * FollowPathing.ALPHA_DOWN_RELAXATION : follow;
+    }
+
+    private static double sqr(double v) {
+        return v * v;
+    }
+
+    /** Re-arms the progress watchdog from the mob's current position. */
+    private void resetWatchdog(long now) {
+        this.lastProgressX = this.mob.getX();
+        this.lastProgressZ = this.mob.getZ();
+        this.lastProgressGameTime = now;
+    }
+
+    /**
+     * Non-progress watchdog. Returns true when the tick was consumed by it (release entered),
+     * false when normal repathing should proceed. At {@link #STUCK_ESCALATE_TICKS} of no
+     * horizontal movement it escalates once: clears every memo/committed target so the next
+     * repath is genuinely fresh instead of replaying a memoized failure. If the member STILL
+     * has not moved by {@link #STUCK_RELEASE_TICKS}, the goal releases itself temporarily so
+     * idle goals can take over rather than holding MOVE while frozen in place.
+     */
+    private boolean watchdogTick() {
+        long now = this.mob.level().getGameTime();
+        double dx = this.mob.getX() - this.lastProgressX;
+        double dz = this.mob.getZ() - this.lastProgressZ;
+        if (dx * dx + dz * dz > 1.0) {
+            this.resetWatchdog(now);
+            return false;
+        }
+        long stuck = now - this.lastProgressGameTime;
+        if (stuck < STUCK_ESCALATE_TICKS) {
+            return false;
+        }
+        if (stuck >= STUCK_RELEASE_TICKS) {
+            // 30s of zero progress with every escape fallback exhausted: strongest evidence
+            // of entrapment. Before releasing, let the fence-secession path confirm the trap
+            // (cached pen check) and, if real, move this animal and its pen-mates into a
+            // cap-free pen herd. Rate-limited inside; no-op for healthy animals.
+            HerdEvents.trySecedeIfFencedIn(this.mob);
+            this.releasedUntilGameTime = now + RELEASE_COOLDOWN_MIN
+                    + (long)this.mob.getRandom().nextInt(RELEASE_COOLDOWN_SPAN);
+            if (this.alpha != null) {
+                this.alphaPosAtReleaseX = this.alpha.getX();
+                this.alphaPosAtReleaseZ = this.alpha.getZ();
+            }
+            this.stop();
+            return true;
+        }
+        // Escalation window: only fire once per stuck period (the escalation itself does not
+        // reset the give-up clock).
+        if (stuck >= STUCK_ESCALATE_TICKS && stuck % STUCK_ESCALATE_TICKS < 2L) {
+            this.fallbackTarget = null;
+            this.escapeTarget = null;
+            this.lastBlockedAlphaX = 0.0;
+            this.lastBlockedAlphaZ = 0.0;
+            this.lastBlockedGameTime = Long.MIN_VALUE;
+            this.repathCooldown = 0;
+            FollowPathing.resetFor(this.mob);
+            this.moveToAlpha();
+        }
+        return false;
+    }
+
     private boolean isWary() {
         return HerdManager.panicPhaseOf(this.mob, this.mob.level().getGameTime()) == HerdManager.PanicPhase.WARY;
+    }
+
+    /**
+     * Night rejoin service: at sleep time follow normally stands down so the herd settles,
+     * but a member that ends up OUTSIDE its rest circle (a drink trek to a distant pond, a
+     * shove, terrain) would strand there until morning. While this is true the goal stays
+     * usable purely as a walk-back-to-the-huddle; once the member is back inside the rest
+     * circle it flips false and the normal settle/sleep routine takes over. Un-herded
+     * animals (-1) never rejoin.
+     */
+    private static boolean needsNightRejoin(Animal mob) {
+        double dist = FollowPathing.distanceToAlpha(mob);
+        return dist >= 0.0D && dist > FollowPathing.herdRestRadius(mob);
     }
 
     private boolean shouldYieldForFood() {
         if (this.wary) {
             return false;
         }
-        boolean foodTarget = this.mob.hasData(HungerAttachments.FOOD_TARGET);
+        boolean foodTarget = this.mob.hasData(ModAttachments.FOOD_TARGET);
         boolean urgentHungry = Hunger.hasHungerData(this.mob) && Hunger.isUrgentlyHungry(this.mob);
         boolean urgentThirsty = com.charybdis180.ethological.thirst.Thirst.hasThirstData(this.mob)
                 && com.charybdis180.ethological.thirst.Thirst.isUrgentlyThirsty(this.mob);
@@ -111,7 +208,7 @@ extends Goal {
         // alone, while the drink goal sits in a no-water backoff, leaves the member with
         // NO running goal: it stands still doing "escaping" instead of moving. So only
         // yield on thirst when the drink goal can actually act.
-        boolean waterTarget = this.mob.hasData(com.charybdis180.ethological.thirst.ThirstAttachments.WATER_TARGET);
+        boolean waterTarget = this.mob.hasData(com.charybdis180.ethological.registry.ModAttachments.WATER_TARGET);
         boolean result = foodTarget || urgentHungry || waterTarget;
         return result;
     }
@@ -129,8 +226,156 @@ extends Goal {
         }
         double angle = com.charybdis180.ethological.util.Personality.angleRadians(this.mob.getUUID(), "follow_station");
         double fraction = FollowAlphaGoal.stationFraction(this.mob);
-        return alpha.position().add(Math.cos(angle) * follow * fraction, 0.0, Math.sin(angle) * follow * fraction);
+        Vec3 base = alpha.position().add(Math.cos(angle) * follow * fraction, 0.0, Math.sin(angle) * follow * fraction);
+        // Pen-disperse follow mode: a penned herd's day station is a wide personal spot spread
+        // across the whole enclosure instead of a tight ring around the alpha, so large pens
+        // look like grazing animals rather than one huddled clump. Near bedtime (or while the
+        // alpha is down) the radius collapses back to the normal ring so the existing
+        // settle/sleep/huddle routines take over untouched.
+        if (!FollowAlphaGoal.penDispersing(this.mob)) {
+            return this.softClearedStation(base, !this.mob.isInWater());
+        }
+        double disperseR = FollowAlphaGoal.penDisperseRadius(this.mob);
+        if (disperseR <= follow) {
+            return base;
+        }
+        Vec3 dispersed = alpha.position().add(
+                Math.cos(angle) * disperseR * FollowAlphaGoal.disperseFraction(this.mob),
+                0.0,
+                Math.sin(angle) * disperseR * FollowAlphaGoal.disperseFraction(this.mob));
+        LongSet pen = this.penRegionMemo(alpha);
+        if (pen == null) {
+            return this.softClearedStation(base, !this.mob.isInWater());
+        }
+        BlockPos clamped = Homes.findStandInRegion(this.mob.level(), dispersed.x, dispersed.z, pen,
+                java.util.Set.of(), 0);
+        if (clamped == null) {
+            return this.softClearedStation(base, !this.mob.isInWater());
+        }
+        return this.softClearedStation(Vec3.atLowerCornerOf(clamped), !this.mob.isInWater());
     }
+
+    /** Soft-station search bounds: six probes stepping 45 degrees each side, and how far a
+     *  rotated candidate may differ vertically from the animal's own feet column. */
+    private static final int STATION_ROTATION_PROBES = 6;
+    private static final double STATION_ROTATION_STEP_RAD = Math.PI / 4.0D;
+    private static final double STATION_MAX_DY = 2.0D;
+
+    /**
+     * Decision-time personal space ("soft" avoidance): the follow station is a preference,
+     * so when the chosen spot has a herd-mate inside the configured clear-space radius, the
+     * member aims at an equidistant spot rotated a few steps around itself instead. Herds
+     * spread out at arrival-choice time without anyone being physically shoved — the
+     * CrowdGrid cushion stays a light anti-interpenetration nudge. Falls back to the
+     * original station when no rotation finds clear ground.
+     */
+    private Vec3 softClearedStation(Vec3 station, boolean dryPreferred) {
+        double spacing = com.charybdis180.ethological.config.EthologicalConfig.CONFIG.comfort.crowdSpacingRadius.get();
+        BlockPos spot = BlockPos.containing(station.x, this.mob.getY(), station.z);
+        // A base station sitting ON water is only accepted when no dry rotation candidate
+        // exists (soft preference, not a hard ban — wading to rejoin the alpha stays legal).
+        BlockPos baseStand = Homes.surfaceStand(this.mob.level(), spot.getX(), spot.getZ());
+        boolean baseWet = dryPreferred && baseStand != null && !Homes.isDryLand(this.mob.level(), baseStand);
+        if (!baseWet && com.charybdis180.ethological.avoidance.CrowdGrid.isSpaced(this.mob.level(), spot, spacing)) {
+            return station;
+        }
+        Vec3 offset = station.subtract(this.mob.position());
+        double distSq = offset.x * offset.x + offset.z * offset.z;
+        if (distSq < 1.0E-4D) {
+            return station;
+        }
+        double dist = Math.sqrt(distSq);
+        double baseAngle = Math.atan2(offset.z, offset.x);
+        for (int i = 1; i <= STATION_ROTATION_PROBES; ++i) {
+            int step = (i + 1) / 2;
+            double angle = baseAngle + ((i & 1) == 1 ? step : -step) * STATION_ROTATION_STEP_RAD;
+            double cx = this.mob.getX() + Math.cos(angle) * dist;
+            double cz = this.mob.getZ() + Math.sin(angle) * dist;
+            BlockPos stand = Homes.surfaceStand(this.mob.level(), (int)Math.floor(cx), (int)Math.floor(cz));
+            if (stand == null || Math.abs(stand.getY() - this.mob.getBlockY()) > STATION_MAX_DY
+                    || !Homes.isDryLand(this.mob.level(), stand)
+                    || !Homes.isCliffSafe(this.mob.level(), stand)) {
+                continue;
+            }
+            if (com.charybdis180.ethological.avoidance.CrowdGrid.isSpaced(this.mob.level(), stand, spacing)) {
+                return Vec3.atLowerCornerOf(stand);
+            }
+        }
+        return station;
+    }
+
+    /** True while the member's herd is a pen herd AND it is daytime (well before the sleep
+     *  window), i.e. exactly when dispersal should apply. Memoized for ~1s per member; cache
+     *  invalidates on herd change. */
+    private static boolean penDispersing(Animal mob) {
+        long now = mob.level().getGameTime();
+        HerdData data = mob.hasData(ModAttachments.HERD_DATA)
+                ? (HerdData)mob.getData(ModAttachments.HERD_DATA)
+                : null;
+        UUID herdId = data != null ? data.herdId() : null;
+        DisperseMemo memo = PEN_DISPERSE_MEMO.get(mob.getUUID());
+        if (memo != null && memo.stampSecond == now / 20L
+                && (memo.herdId == null ? herdId == null : memo.herdId.equals(herdId))) {
+            return memo.dispersing;
+        }
+        boolean result = false;
+        if (data != null) {
+            HerdManager.Herd herd = HerdManager.get(herdId);
+            if (herd != null && herd.penHerd && !mob.isBaby()) {
+                Optional<com.charybdis180.ethological.sleep.SpeciesSleepSettings> sleepOpt =
+                        SleepSettingsManager.get(mob.getType());
+                boolean nearBedtime = sleepOpt.isPresent()
+                        && com.charybdis180.ethological.home.Homes.ticksUntilSleepStart(
+                                mob.level().getDayTime(), sleepOpt.get().sleepStartTick()) < 600L;
+                result = !nearBedtime;
+            }
+        }
+        if (PEN_DISPERSE_MEMO.size() > 4096) {
+            PEN_DISPERSE_MEMO.clear();
+        }
+        PEN_DISPERSE_MEMO.put(mob.getUUID(), new DisperseMemo(now / 20L, result, herdId));
+        return result;
+    }
+
+    private record DisperseMemo(long stampSecond, boolean dispersing, UUID herdId) {
+    }
+
+    private static final java.util.Map<UUID, DisperseMemo> PEN_DISPERSE_MEMO = new java.util.HashMap<>();
+
+    /** Dispersal distance: the enclosure's own extent around the herd's home anchor plus a
+     *  margin, so stations genuinely spread through the pen instead of clustering at one ring
+     *  radius. Falls back to 4x follow when no home anchor resolves. */
+    private static double penDisperseRadius(Animal mob) {
+        Optional<SpeciesHerdSettings> settings = HerdSettingsManager.get(mob.getType());
+        double follow = settings.map(SpeciesHerdSettings::followDistance).orElse(8.0);
+        if (!mob.hasData(ModAttachments.HOME)) {
+            return 4.0 * follow;
+        }
+        BlockPos home = ((HomeData)mob.getData(ModAttachments.HOME)).pos();
+        double dx = mob.getX() - home.getX();
+        double dz = mob.getZ() - home.getZ();
+        double extent = Math.sqrt(dx * dx + dz * dz);
+        return Math.max(4.0 * follow, extent + 6.0);
+    }
+
+    /** Fraction of the dispersal radius this member holds its station at (stable per member). */
+    private static double disperseFraction(Animal mob) {
+        return 0.35 + 0.55 * com.charybdis180.ethological.util.Personality.unit(mob.getUUID(), "pen_disperse_radius");
+    }
+
+    /** The member's cached pen flood region, refreshed at most every ~40 ticks; null when the
+     *  region cannot be resolved right now. Shared cache entry per member keeps the cost O(1). */
+    private LongSet penRegionMemo(Animal alpha) {
+        long now = this.mob.level().getGameTime();
+        if (this.penRegionCache != null && now - this.penRegionStamp < 40L) {
+            return this.penRegionCache;
+        }
+        this.penRegionStamp = now;
+        this.penRegionCache = FenceDetection.regionOf(alpha);
+        return this.penRegionCache;
+    }
+    private LongSet penRegionCache;
+    private long penRegionStamp = Long.MIN_VALUE;
 
     /**
      * Fraction of the follow distance a member holds its personal station at.
@@ -182,27 +427,28 @@ extends Goal {
                 Object sleep;
                 Optional<SpeciesSleepSettings> sleepOpt;
                 settings = this.settings();
-                if (settings == null || !this.mob.hasData(HerdAttachments.HERD_DATA)) {
+                if (settings == null || !this.mob.hasData(ModAttachments.HERD_DATA)) {
                     return false;
                 }
-                if (this.mob.isBaby() && this.mob.hasData(HerdAttachments.MOTHER)) {
+                if (this.mob.isBaby() && this.mob.hasData(ModAttachments.MOTHER)) {
                     return false;
                 }
-                HerdData data = (HerdData)this.mob.getData(HerdAttachments.HERD_DATA);
+                HerdData data = (HerdData)this.mob.getData(ModAttachments.HERD_DATA);
                 if (data.alpha()) {
                     return false;
                 }
                 this.wary = this.isWary();
-                if (((Boolean)this.mob.getData(SleepAttachments.SLEEPING)).booleanValue() || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE) && !this.wary) {
+                if (this.mob.getData(ModAttachments.SLEEPING) || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE) && !this.wary) {
                     return false;
                 }
                 if (this.shouldYieldForFood()) {
                     return false;
                 }
-                if (!this.wary && Hunger.isRuminating((Entity)this.mob)) {
+                if (!this.wary && Hunger.isRuminating(this.mob)) {
                     return false;
                 }
-                if (!this.wary && (sleepOpt = SleepSettingsManager.get(this.mob.getType())).isPresent() && ((SpeciesSleepSettings)(sleep = sleepOpt.get())).isSleepTime(dayTime = this.mob.level().getDayTime()) && !Homes.shouldTravelHome(this.mob, dayTime, (SpeciesSleepSettings)sleep)) {
+                if (!this.wary && (sleepOpt = SleepSettingsManager.get(this.mob.getType())).isPresent() && ((SpeciesSleepSettings)(sleep = sleepOpt.get())).isSleepTime(dayTime = this.mob.level().getDayTime()) && !Homes.shouldTravelHome(this.mob, dayTime, (SpeciesSleepSettings)sleep)
+                        && !FollowAlphaGoal.needsNightRejoin(this.mob)) {
                     return false;
                 }
                 sleep = this.mob.level();
@@ -222,9 +468,24 @@ extends Goal {
             return false;
         }
         double follow = this.followDistance(settings);
-        if ((double)this.mob.distanceTo((Entity)alphaAnimal) <= follow) {
+        double settle = this.settleRadius(alphaAnimal, settings, follow);
+        double dist = this.mob.distanceTo((Entity)alphaAnimal);
+        long now = this.mob.level().getGameTime();
+        // Dormant after a watchdog release: only resume early when the alpha moved away,
+        // the member drifted far out of the settle circle, or the cooldown ran out.
+        if (now < this.releasedUntilGameTime) {
+            boolean alphaMoved = sqr(alphaAnimal.getX() - this.alphaPosAtReleaseX)
+                    + sqr(alphaAnimal.getZ() - this.alphaPosAtReleaseZ) > RELEASE_RESUME_MOVE_SQR;
+            boolean drifted = dist > settle * ESCAPE_DISTANCE_MULTIPLIER;
+            if (!alphaMoved && !drifted) {
+                return false;
+            }
+            this.releasedUntilGameTime = Long.MIN_VALUE;
+        }
+        if (dist <= settle) {
             return false;
         }
+        this.resetWatchdog(now);
         this.alpha = alphaAnimal;
         return true;
     }
@@ -237,20 +498,21 @@ extends Goal {
         if (settings == null) {
             return false;
         }
-        if (this.mob.isBaby() && this.mob.hasData(HerdAttachments.MOTHER)) {
+        if (this.mob.isBaby() && this.mob.hasData(ModAttachments.MOTHER)) {
             return false;
         }
         this.wary = this.isWary();
         if (this.shouldYieldForFood()) {
             return false;
         }
-        if (!this.wary && Hunger.isRuminating((Entity)this.mob)) {
+        if (!this.wary && Hunger.isRuminating(this.mob)) {
             return false;
         }
-        if (!this.wary && (sleepOpt = SleepSettingsManager.get(this.mob.getType())).isPresent() && (sleep = sleepOpt.get()).isSleepTime(dayTime = this.mob.level().getDayTime()) && !Homes.shouldTravelHome(this.mob, dayTime, sleep)) {
+        if (!this.wary && (sleepOpt = SleepSettingsManager.get(this.mob.getType())).isPresent() && (sleep = sleepOpt.get()).isSleepTime(dayTime = this.mob.level().getDayTime()) && !Homes.shouldTravelHome(this.mob, dayTime, sleep)
+                && !FollowAlphaGoal.needsNightRejoin(this.mob)) {
             return false;
         }
-        if (this.alpha == null || !this.alpha.isAlive() || ((Boolean)this.mob.getData(SleepAttachments.SLEEPING)).booleanValue() || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE) && !this.wary) {
+        if (this.alpha == null || !this.alpha.isAlive() || this.mob.getData(ModAttachments.SLEEPING) || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE) && !this.wary) {
             return false;
         }
         double follow = this.followDistance(settings);
@@ -258,7 +520,7 @@ extends Goal {
         // idle goals (rest/stroll/play) can take the MOVE slot again. Previously the
         // goal held MOVE until 0.6x follow of the station, which trapped members inside
         // the free zone in a "following" state.
-        boolean arrivedStop = this.mob.distanceTo(this.alpha) <= follow;
+        boolean arrivedStop = this.mob.distanceTo(this.alpha) <= this.settleRadius(this.alpha, settings, follow);
         return !arrivedStop;
     }
 
@@ -267,6 +529,7 @@ extends Goal {
         // slam the pathfinder with ~20 simultaneous moveToAlpha chains.
         this.repathCooldown = FIRST_REPATH_STAGGER_MIN
                 + Math.floorMod(this.mob.getUUID().hashCode(), FIRST_REPATH_STAGGER_SPAN);
+        this.resetWatchdog(this.mob.level().getGameTime());
         if (this.repathCooldown <= FIRST_REPATH_STAGGER_MIN) {
             this.moveToAlpha();
         }
@@ -279,12 +542,15 @@ extends Goal {
             // Back inside the follow circle, or arrived at this member's personal station:
             // stop navigating so idle goals take over. The goal releases on the circle
             // boundary (see canContinueToUse), so this only stops the path mid-tick.
-            boolean arrived = this.mob.distanceTo(this.alpha) <= follow
+            boolean arrived = this.mob.distanceTo(this.alpha) <= this.settleRadius(this.alpha, settings, follow)
                     || FollowPathing.arrived(this.mob, Math.max(1.0, follow * 0.15), this.stationTargetXZ(settings, follow));
             if (arrived) {
                 this.mob.getNavigation().stop();
                 return;
             }
+        }
+        if (this.watchdogTick()) {
+            return;
         }
         if (this.repathCooldown > 0) {
             --this.repathCooldown;
@@ -341,7 +607,7 @@ extends Goal {
             double len;
             Entity threat;
             ServerLevel serverLevel = (ServerLevel)level;
-            HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(HerdAttachments.HERD_DATA)).herdId());
+            HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(ModAttachments.HERD_DATA)).herdId());
             if (herd != null && herd.threatId() != null && (threat = serverLevel.getEntity(herd.threatId())) != null && threat.isAlive() && (len = Math.sqrt((dx = threat.getX() - this.alpha.getX()) * dx + (dz = threat.getZ() - this.alpha.getZ()) * dz)) > 0.001) {
                 x += dx / len * 2.0;
                 z += dz / len * 2.0;
@@ -363,8 +629,8 @@ extends Goal {
         // a herd-mate just escaped to a shared stand: that proves a route exists NOW, so the
         // memo should not suppress trying it.
         boolean _freshSharedEscape = false;
-        if (this.mob instanceof Animal _animal && this.mob.hasData(HerdAttachments.HERD_DATA)) {
-            HerdManager.Herd _h = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        if (this.mob instanceof Animal _animal && this.mob.hasData(ModAttachments.HERD_DATA)) {
+            HerdManager.Herd _h = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
             if (_h != null) {
                 _freshSharedEscape = _h.escapeShare(this.mob.level().getGameTime()) != null;
             }
@@ -392,6 +658,24 @@ extends Goal {
             if (escape != null) {
                 this.lastBlockedGameTime = Long.MIN_VALUE;
                 this.mob.getNavigation().moveTo(escape, speed);
+                this.repathCooldown = NUDGE_REPATH_BACKOFF;
+                return;
+            }
+            // Far-member walk-home fallback. A member returning from a distant drink trek
+            // often sits BELOW the herd's level (pond basin vs. camp rise); escapePlan then
+            // rejects every probe ("stand must not worsen the vertical gap") and memoizes a
+            // 3-minute failure — the member stands still all night. The validated-hop
+            // machinery used by near members works fine at any separation: one hazard-checked
+            // leg toward the alpha per repath keeps it homing without needing a full-route
+            // proof the pathfinder cannot deliver at 100+ blocks.
+            BlockPos alphaCol = this.alpha.blockPosition();
+            Path hop = FollowPathing.hopToward(this.mob, alphaCol, FollowPathing.MAX_STEP_Y);
+            if (hop == null) {
+                hop = FollowPathing.nudgeToward(this.mob, alphaCol, FollowPathing.MAX_STEP_Y);
+            }
+            if (hop != null) {
+                this.lastBlockedGameTime = Long.MIN_VALUE;
+                this.mob.getNavigation().moveTo(hop, speed);
                 this.repathCooldown = NUDGE_REPATH_BACKOFF;
                 return;
             }
@@ -445,8 +729,8 @@ extends Goal {
                 return;
             }
         }
-        if (this.mob.level() instanceof ServerLevel serverLevel && this.mob.hasData(HerdAttachments.HERD_DATA)) {
-            HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        if (this.mob.level() instanceof ServerLevel serverLevel && this.mob.hasData(ModAttachments.HERD_DATA)) {
+            HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
             BlockPos waypoint = herd != null ? HerdManager.routeWaypointAhead(serverLevel, herd, this.mob) : null;
             if (waypoint != null) {
                 Path waypointPath = FollowPathing.pathToSurfaceStand(this.mob, waypoint, FollowPathing.MAX_STEP_Y);
@@ -495,10 +779,10 @@ extends Goal {
 
     /** Publish this member's validated route so herd-mates can trail the same path. */
     private void shareRoute(Path path) {
-        if (!(this.mob.level() instanceof ServerLevel serverLevel) || !this.mob.hasData(HerdAttachments.HERD_DATA)) {
+        if (!(this.mob.level() instanceof ServerLevel serverLevel) || !this.mob.hasData(ModAttachments.HERD_DATA)) {
             return;
         }
-        HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
         if (herd != null) {
             HerdManager.shareRoute(serverLevel, herd, path);
         }
@@ -507,10 +791,10 @@ extends Goal {
     /** Invalidate the herd's shared escape stand when this member proved it unusable, so
      * the rest of the herd stops following a route that fails (unreachable / didn't escape). */
     private void clearSharedEscape(BlockPos stand) {
-        if (!(this.mob.level() instanceof ServerLevel serverLevel) || !this.mob.hasData(HerdAttachments.HERD_DATA)) {
+        if (!(this.mob.level() instanceof ServerLevel serverLevel) || !this.mob.hasData(ModAttachments.HERD_DATA)) {
             return;
         }
-        HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
         if (herd == null) {
             return;
         }
@@ -603,10 +887,10 @@ extends Goal {
     }
 
     private boolean isSentinel() {
-        if (!(this.mob.level() instanceof ServerLevel serverLevel) || !this.mob.hasData(HerdAttachments.HERD_DATA)) {
+        if (!(this.mob.level() instanceof ServerLevel serverLevel) || !this.mob.hasData(ModAttachments.HERD_DATA)) {
             return false;
         }
-        HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
         if (herd == null || herd.alphaId == null) {
             return false;
         }

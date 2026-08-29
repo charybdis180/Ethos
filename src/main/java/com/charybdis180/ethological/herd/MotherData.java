@@ -1,16 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.datafixers.kinds.App
- *  com.mojang.datafixers.kinds.Applicative
- *  com.mojang.serialization.Codec
- *  com.mojang.serialization.codecs.RecordCodecBuilder
- *  net.minecraft.core.UUIDUtil
- *  net.minecraft.network.RegistryFriendlyByteBuf
- *  net.minecraft.network.codec.ByteBufCodecs
- *  net.minecraft.network.codec.StreamCodec
- */
 package com.charybdis180.ethological.herd;
 
 import com.mojang.serialization.Codec;
@@ -24,7 +11,7 @@ import net.minecraft.network.codec.StreamCodec;
 public record MotherData(UUID motherId, long followUntilGameTime) {
     public static final MotherData DEFAULT = new MotherData(new UUID(0L, 0L), 0L);
     public static final Codec<MotherData> CODEC = RecordCodecBuilder.create(instance -> instance.group(UUIDUtil.CODEC.fieldOf("mother_id").forGetter(MotherData::motherId), Codec.LONG.fieldOf("follow_until").forGetter(MotherData::followUntilGameTime)).apply(instance, MotherData::new));
-    public static final StreamCodec<RegistryFriendlyByteBuf, MotherData> STREAM_CODEC = StreamCodec.composite((StreamCodec)UUIDUtil.STREAM_CODEC, MotherData::motherId, (StreamCodec)ByteBufCodecs.VAR_LONG, MotherData::followUntilGameTime, MotherData::new);
+    public static final StreamCodec<RegistryFriendlyByteBuf, MotherData> STREAM_CODEC = StreamCodec.composite(UUIDUtil.STREAM_CODEC, MotherData::motherId, ByteBufCodecs.VAR_LONG, MotherData::followUntilGameTime, MotherData::new);
 
     /** True when this is a real mother link that has not expired yet. */
     public boolean isActive(long gameTime) {

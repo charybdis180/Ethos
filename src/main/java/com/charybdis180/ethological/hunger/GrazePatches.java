@@ -1,23 +1,9 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.BlockPos$MutableBlockPos
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.LevelReader
- *  net.minecraft.world.level.block.Block
- *  net.minecraft.world.level.block.Blocks
- *  net.minecraft.world.level.block.state.BlockState
- */
 package com.charybdis180.ethological.hunger;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.GrazePatchData;
-import com.charybdis180.ethological.hunger.HungerAttachments;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
@@ -53,17 +39,17 @@ public final class GrazePatches {
     }
 
     public static boolean isPatchLeader(Animal animal) {
-        if (!animal.hasData(HerdAttachments.HERD_DATA)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA)) {
             return true;
         }
-        return ((HerdData)animal.getData(HerdAttachments.HERD_DATA)).alpha();
+        return ((HerdData)animal.getData(ModAttachments.HERD_DATA)).alpha();
     }
 
     public static Optional<BlockPos> effectivePatch(Animal animal) {
         if (GrazePatches.isPatchLeader(animal)) {
-            return animal.hasData(HungerAttachments.GRAZE_PATCH) ? Optional.of(((GrazePatchData)animal.getData(HungerAttachments.GRAZE_PATCH)).center()) : Optional.empty();
+            return animal.hasData(ModAttachments.GRAZE_PATCH) ? Optional.of(((GrazePatchData)animal.getData(ModAttachments.GRAZE_PATCH)).center()) : Optional.empty();
         }
-        return Homes.herdAlpha(animal).filter(alpha -> alpha.hasData(HungerAttachments.GRAZE_PATCH)).map(alpha -> ((GrazePatchData)alpha.getData(HungerAttachments.GRAZE_PATCH)).center());
+        return Homes.herdAlpha(animal).filter(alpha -> alpha.hasData(ModAttachments.GRAZE_PATCH)).map(alpha -> ((GrazePatchData)alpha.getData(ModAttachments.GRAZE_PATCH)).center());
     }
 
     public static boolean isFoodAt(LevelReader level, BlockPos pos, Set<Block> foodBlocks) {
@@ -81,6 +67,14 @@ public final class GrazePatches {
         Block above = level.getBlockState(pos.above()).getBlock();
         boolean posIsFood = foodBlocks.contains(atPos);
         boolean aboveIsFood = foodBlocks.contains(above);
+        // The animal occupies pos.above() in both conventions: grass food sits AT pos (mob
+        // stands on top of it), and a crop sits ABOVE pos (mob stands in the cell the crop
+        // grows in). A water-immersed stand would force the mob to swim to graze — reject
+        // shoreline-flooded grass and crops. Bare LevelReader presence probes fall through.
+        BlockPos stand = pos.above();
+        if (level instanceof Level realLevel && !Homes.isDryLand(realLevel, stand)) {
+            return false;
+        }
         if (posIsFood && atPos == Blocks.GRASS_BLOCK) {
             return true;
         }

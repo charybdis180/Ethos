@@ -1,8 +1,8 @@
 package com.charybdis180.ethological.spawn;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.Ethological;
 import com.charybdis180.ethological.config.EthologicalConfig;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
@@ -299,10 +299,18 @@ public final class SpawnEvents {
             if (event.getEntity() instanceof Animal animal
                     && !chunkGenHasWaterNearby(animal, pos, waterRadius)) {
                 event.setResult(MobSpawnEvent.PositionCheck.Result.FAIL);
+            } else if (avoidCliffSpawns()
+                    && event.getEntity() instanceof Animal animal
+                    && !chunkGenCliffSafe(animal, pos)) {
+                event.setResult(MobSpawnEvent.PositionCheck.Result.FAIL);
             }
             return;
         }
         ServerLevelAccessor level = event.getLevel();
+        if (avoidCliffSpawns() && event.getEntity() instanceof Animal && !naturalCliffSafe(level, pos)) {
+            event.setResult(MobSpawnEvent.PositionCheck.Result.FAIL);
+            return;
+        }
         // Water gate is existence-based: MobSpawnEvent.PositionCheck probes a fresh entity
         // that is NEVER added to the world, so the pathfinder has no valid start node and a
         // strict pathfinding gate can never pass (that blocked every natural spawn). The
@@ -331,6 +339,70 @@ public final class SpawnEvents {
      * no nearby chunk is loaded yet the check is inconclusive and allows the spawn (the strict
      * reachability gate still applies to natural spawns on the server thread).
      */
+    private static boolean avoidCliffSpawns() {
+        return EthologicalConfig.CONFIG.comfort.avoidCliffSpawns.get();
+    }
+
+    /**
+     * Cliff check for natural spawns on the server thread: same 3-block scan / 3-block
+     * max-drop rule as {@code Homes.isCliffSafe}, but via {@code LevelReader#getHeight} so it
+     * works with the {@code ServerLevelAccessor} the PositionCheck event provides. Heightmap
+     * surface includes water columns at their surface, so pond/river edges stay acceptable.
+     */
+    private static boolean naturalCliffSafe(ServerLevelAccessor level, BlockPos center) {
+        int baseY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, center.getX(), center.getZ());
+        int radius = 3;
+        int maxDrop = 3;
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dz = -radius; dz <= radius; ++dz) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                int neighborY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                        center.getX() + dx, center.getZ() + dz);
+                if (baseY - neighborY > maxDrop) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Cliff check for chunk-generation spawn checks (chunk worker threads): same constraint as
+     * {@link #chunkGenHasWaterNearby} — only {@code getChunkNow}, never a blocking read.
+     * Scans the surface heightmap of loaded neighbor chunks for drops beyond
+     * {@code CLIFF_MAX_DROP}; unloaded neighbors are inconclusive and don't fail the spot,
+     * matching the water probe's permissiveness. Surface Y from the heightmap includes water
+     * columns at their surface so pond edges stay acceptable, mirroring Homes.isCliffSafe.
+     */
+    private static boolean chunkGenCliffSafe(Animal mob, BlockPos center) {
+        if (!(mob.level() instanceof ServerLevel level)) {
+            return true;
+        }
+        int baseY = center.getY();
+        int radius = 3;
+        int maxDrop = 3;
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dz = -radius; dz <= radius; ++dz) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                int x = center.getX() + dx;
+                int z = center.getZ() + dz;
+                LevelChunk chunk = level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+                if (chunk == null) {
+                    continue;
+                }
+                int neighborY = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15);
+                if (baseY - neighborY > maxDrop) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private static boolean chunkGenHasWaterNearby(Animal mob, BlockPos center, int radius) {
         if (!(mob.level() instanceof ServerLevel level)) {
             return true;
@@ -412,7 +484,8 @@ public final class SpawnEvents {
                 break;
             }
             mate.moveTo(candidate.getX() + 0.5, candidate.getY(), candidate.getZ() + 0.5, random.nextFloat() * 360.0F, 0.0F);
-            if (Homes.hasAccessibleWater(level, candidate, waterRadius)) {
+            if (Homes.hasAccessibleWater(level, candidate, waterRadius)
+                    && (!avoidCliffSpawns() || Homes.isCliffSafe(level, candidate))) {
                 pos = candidate;
                 break;
             }
@@ -422,7 +495,7 @@ public final class SpawnEvents {
         }
         mate.setBaby(baby);
         if (baby && mother != null) {
-            mate.setData(HerdAttachments.MOTHER, MotherData.create(mother.getUUID(), now, followTicks));
+            mate.setData(ModAttachments.MOTHER, MotherData.create(mother.getUUID(), now, followTicks));
         }
         if (!EventHooks.checkSpawnPosition(mate, level, spawnType)) {
             return null;
@@ -438,7 +511,7 @@ public final class SpawnEvents {
         }
         mate.setBaby(baby);
         if (baby && mother != null) {
-            mate.setData(HerdAttachments.MOTHER, MotherData.create(mother.getUUID(), now, followTicks));
+            mate.setData(ModAttachments.MOTHER, MotherData.create(mother.getUUID(), now, followTicks));
         }
         level.addFreshEntityWithPassengers(mate);
         return mate;
@@ -456,12 +529,12 @@ public final class SpawnEvents {
             if (!member.isAlive() || !member.isBaby()) {
                 continue;
             }
-            if (member.hasData(HerdAttachments.MOTHER)
-                    && ((MotherData)member.getData(HerdAttachments.MOTHER)).isActive(now)) {
+            if (member.hasData(ModAttachments.MOTHER)
+                    && ((MotherData)member.getData(ModAttachments.MOTHER)).isActive(now)) {
                 continue;
             }
             Animal mother = adults.get(random.nextInt(adults.size()));
-            member.setData(HerdAttachments.MOTHER, MotherData.create(mother.getUUID(), now, followTicks));
+            member.setData(ModAttachments.MOTHER, MotherData.create(mother.getUUID(), now, followTicks));
         }
     }
 
@@ -488,7 +561,7 @@ public final class SpawnEvents {
             HerdManager.Herd existing = findMergeablePackHerd(level, living.get(0), settingsOpt.get());
             if (existing != null) {
                 for (Animal member : living) {
-                    member.setData(HerdAttachments.HERD_DATA, new HerdData(existing.id, false));
+                    member.setData(ModAttachments.HERD_DATA, new HerdData(existing.id, false));
                     existing.members.add(member.getUUID());
                 }
                 return;
@@ -512,7 +585,7 @@ public final class SpawnEvents {
         herd.members.addAll(ids);
         for (Animal member : living) {
             boolean isAlpha = member.getUUID().equals(alphaId) && !member.isBaby();
-            member.setData(HerdAttachments.HERD_DATA, new HerdData(herd.id, isAlpha));
+            member.setData(ModAttachments.HERD_DATA, new HerdData(herd.id, isAlpha));
         }
         Ethological.LOGGER.debug(
                 "Ethological: spawn pack formed herd {} with {} members (alpha {})",
@@ -530,8 +603,8 @@ public final class SpawnEvents {
     private static HerdManager.Herd findMergeablePackHerd(ServerLevel level, Animal origin, SpeciesHerdSettings settings) {
         for (Animal other : level.getEntitiesOfClass(Animal.class,
                 origin.getBoundingBox().inflate(settings.joinRadius()),
-                a -> a != origin && a.getType() == origin.getType() && a.hasData(HerdAttachments.HERD_DATA))) {
-            HerdManager.Herd herd = HerdManager.get(((HerdData)other.getData(HerdAttachments.HERD_DATA)).herdId());
+                a -> a != origin && a.getType() == origin.getType() && a.hasData(ModAttachments.HERD_DATA))) {
+            HerdManager.Herd herd = HerdManager.get(((HerdData)other.getData(ModAttachments.HERD_DATA)).herdId());
             if (herd == null || herd.isPanicking() || HerdManager.adultCount(level, herd) >= settings.maxSize()) {
                 continue;
             }

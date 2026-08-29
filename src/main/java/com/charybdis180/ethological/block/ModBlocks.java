@@ -1,22 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.registries.Registries
- *  net.minecraft.resources.ResourceKey
- *  net.minecraft.world.item.BlockItem
- *  net.minecraft.world.item.CreativeModeTabs
- *  net.minecraft.world.item.Item
- *  net.minecraft.world.item.Item$Properties
- *  net.minecraft.world.level.ItemLike
- *  net.minecraft.world.level.block.Block
- *  net.minecraft.world.level.block.SoundType
- *  net.minecraft.world.level.block.state.BlockBehaviour$Properties
- *  net.minecraft.world.level.block.state.properties.NoteBlockInstrument
- *  net.minecraft.world.level.material.MapColor
- *  net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent
- *  net.neoforged.neoforge.registries.DeferredRegister
- */
 package com.charybdis180.ethological.block;
 
 import com.charybdis180.ethological.block.ChickenFeederBlock;
@@ -37,8 +18,8 @@ import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 public final class ModBlocks {
-    public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create((ResourceKey)Registries.BLOCK, (String)"ethological");
-    public static final DeferredRegister<Item> ITEMS = DeferredRegister.create((ResourceKey)Registries.ITEM, (String)"ethological");
+    public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(Registries.BLOCK, "ethological");
+    public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(Registries.ITEM, "ethological");
     public static final Supplier<TroughBlock> TROUGH = BLOCKS.register("trough", () -> new TroughBlock(ModBlocks.troughProperties()));
     public static final Supplier<ChickenFeederBlock> CHICKEN_FEEDER = BLOCKS.register("chicken_feeder", () -> new ChickenFeederBlock(ModBlocks.chickenFeederProperties()));
     public static final Supplier<BlockItem> TROUGH_ITEM = ITEMS.register("trough", () -> new BlockItem((Block)TROUGH.get(), new Item.Properties()));

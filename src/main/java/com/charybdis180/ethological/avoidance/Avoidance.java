@@ -36,8 +36,17 @@ public final class Avoidance {
     public static final int SCAN_INTERVAL_MIN = 20;
     public static final int SCAN_INTERVAL_SPAN = 21;
 
-    public static final float WATER_MALUS = 16.0f;
-    public static final float WATER_BORDER_MALUS = 4.0f;
+    /**
+     * Cost per water cell for home-species pathing. Deliberately finite (soft), not the
+     * vanilla -1.0 block: animals should avoid wading when a dry route is cheaper, but a
+     * nomad herd or a drinker that must cross a river still can. 40/cell makes a narrow
+     * pond far pricier than a detour, while an effectively-unavoidable crossing stays
+     * possible. The dry-stand selection in the goal stand pickers is the primary
+     * deterrent; this malus is the cheap second-order nudge inside the pathfinder.
+     */
+    public static final float WATER_MALUS = 40.0f;
+    /** Water-adjacent land cells cost extra so banks are slightly less attractive. */
+    public static final float WATER_BORDER_MALUS = 8.0f;
     public static final float DAMAGE_FIRE_MALUS = 16.0f;
     public static final float DANGER_FIRE_MALUS = 16.0f;
     public static final float LAVA_MALUS = 16.0f;

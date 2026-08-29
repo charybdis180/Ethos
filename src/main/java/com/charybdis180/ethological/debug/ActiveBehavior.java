@@ -1,22 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.debug;
 
-import com.charybdis180.ethological.avoidance.AvoidanceAttachments;
-import com.charybdis180.ethological.debug.DebugAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.FollowStyle;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
@@ -28,16 +13,12 @@ import com.charybdis180.ethological.herd.goal.NurseGoal;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.home.NomadicMigration;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.hunger.HungerAttachments;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepDisturbance;
 import com.charybdis180.ethological.sleep.SleepEvents;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.social.goal.CuriousGoal;
 import com.charybdis180.ethological.social.goal.VigilanceGoal;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
@@ -81,21 +62,21 @@ public final class ActiveBehavior {
         long now = animal.level().getGameTime();
         HerdManager.PanicPhase phase = HerdManager.panicPhaseOf(animal, now);
         byte phaseByte = (byte)phase.ordinal();
-        if (!animal.hasData(DebugAttachments.PANIC_PHASE) || (Byte)animal.getData(DebugAttachments.PANIC_PHASE) != phaseByte) {
-            animal.setData(DebugAttachments.PANIC_PHASE,phaseByte);
+        if (!animal.hasData(ModAttachments.PANIC_PHASE) || (Byte)animal.getData(ModAttachments.PANIC_PHASE) != phaseByte) {
+            animal.setData(ModAttachments.PANIC_PHASE,phaseByte);
         }
         String label = ActiveBehavior.resolve(animal, phase);
-        if (!animal.hasData(DebugAttachments.ACTIVE_BEHAVIOR) || !label.equals(animal.getData(DebugAttachments.ACTIVE_BEHAVIOR))) {
-            animal.setData(DebugAttachments.ACTIVE_BEHAVIOR,label);
+        if (!animal.hasData(ModAttachments.ACTIVE_BEHAVIOR) || !label.equals(animal.getData(ModAttachments.ACTIVE_BEHAVIOR))) {
+            animal.setData(ModAttachments.ACTIVE_BEHAVIOR,label);
         }
     }
 
     public static String current(Animal animal) {
-        return animal.hasData(DebugAttachments.ACTIVE_BEHAVIOR) ? (String)animal.getData(DebugAttachments.ACTIVE_BEHAVIOR) : "idle";
+        return animal.hasData(ModAttachments.ACTIVE_BEHAVIOR) ? (String)animal.getData(ModAttachments.ACTIVE_BEHAVIOR) : "idle";
     }
 
     private static String resolve(Animal animal, HerdManager.PanicPhase phase) {
-        if (((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        if (animal.getData(ModAttachments.SLEEPING)) {
             return "sleeping";
         }
         return switch (phase) {
@@ -111,19 +92,19 @@ public final class ActiveBehavior {
         if (ActiveBehavior.isFleeing(animal)) {
             return "flee";
         }
-        if (animal.hasData(AvoidanceAttachments.HAZARD)) {
+        if (animal.hasData(ModAttachments.HAZARD)) {
             return "avoid_hazard";
         }
-        if (animal.hasData(ThirstAttachments.WATER_TARGET)) {
+        if (animal.hasData(ModAttachments.WATER_TARGET)) {
             return "drink";
         }
-        if (animal.hasData(SocialAttachments.STARTLE)) {
+        if (animal.hasData(ModAttachments.STARTLE)) {
             return "startle";
         }
-        if (animal.hasData(SocialAttachments.PLAY)) {
+        if (animal.hasData(ModAttachments.PLAY)) {
             return "play";
         }
-        if (((Boolean)animal.getData(SleepAttachments.RESTING)).booleanValue()) {
+        if (animal.getData(ModAttachments.RESTING)) {
             return "rest";
         }
         if (ActiveBehavior.isSettling(animal)) {
@@ -132,7 +113,7 @@ public final class ActiveBehavior {
         if (ActiveBehavior.isReturning(animal)) {
             return "return";
         }
-        if (animal.hasData(HungerAttachments.FOOD_TARGET)) {
+        if (animal.hasData(ModAttachments.FOOD_TARGET)) {
             return "eat";
         }
         if (ActiveBehavior.isGoalRunning(animal, NurseGoal.class)) {
@@ -188,8 +169,8 @@ public final class ActiveBehavior {
         boolean alphaFlag = false;
         boolean holdsSeat = false;
         boolean alphaResolvable = false;
-        if (animal.hasData(HerdAttachments.HERD_DATA)) {
-            HerdData data = (HerdData)animal.getData(HerdAttachments.HERD_DATA);
+        if (animal.hasData(ModAttachments.HERD_DATA)) {
+            HerdData data = (HerdData)animal.getData(ModAttachments.HERD_DATA);
             alphaFlag = data.alpha();
             if (animal.level() instanceof ServerLevel serverLevel) {
                 HerdManager.Herd herd = HerdManager.get(data.herdId());
@@ -220,7 +201,7 @@ public final class ActiveBehavior {
 
     private static boolean isFleeing(Animal animal) {
         LivingEntity living;
-        if (!animal.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (!animal.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         Level level = animal.level();
@@ -228,7 +209,7 @@ public final class ActiveBehavior {
             return false;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        SleepDisturbance disturbance = (SleepDisturbance)animal.getData(SleepAttachments.SLEEP_DISTURBANCE);
+        SleepDisturbance disturbance = (SleepDisturbance)animal.getData(ModAttachments.SLEEP_DISTURBANCE);
         Entity entity = serverLevel.getEntity(disturbance.threatId());
         if (!(entity instanceof LivingEntity) || !(living = (LivingEntity)entity).isAlive()) {
             return false;
@@ -238,7 +219,7 @@ public final class ActiveBehavior {
 
     private static boolean isSettling(Animal animal) {
         long dayTime;
-        if (animal.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (animal.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         Optional<SpeciesSleepSettings> settingsOpt = SleepSettingsManager.get(animal.getType());
@@ -256,7 +237,7 @@ public final class ActiveBehavior {
     }
 
     private static boolean isReturning(Animal animal) {
-        if (animal.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (animal.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         Optional<SpeciesSleepSettings> settingsOpt = SleepSettingsManager.get(animal.getType());
@@ -273,18 +254,18 @@ public final class ActiveBehavior {
             return false;
         }
         if (settings.isSleepTime(dayTime)) {
-            return animal.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)home.get()))) > 2.25;
+            return animal.distanceToSqr(Vec3.atCenterOf(((Vec3i)home.get()))) > 2.25;
         }
-        double distance = Math.sqrt(animal.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)home.get()))));
+        double distance = Math.sqrt(animal.distanceToSqr(Vec3.atCenterOf(((Vec3i)home.get()))));
         long lead = Math.min(3000L, 200L + (long)(distance / 0.2));
         return Homes.ticksUntilSleepStart(dayTime, settings.sleepStartTick()) <= lead;
     }
 
     private static boolean isFollowingParent(Animal animal) {
-        if (!animal.isBaby() || !animal.hasData(HerdAttachments.MOTHER)) {
+        if (!animal.isBaby() || !animal.hasData(ModAttachments.MOTHER)) {
             return false;
         }
-        MotherData data = (MotherData)animal.getData(HerdAttachments.MOTHER);
+        MotherData data = (MotherData)animal.getData(ModAttachments.MOTHER);
         return animal.level().getGameTime() < data.followUntilGameTime();
     }
 
@@ -295,10 +276,10 @@ public final class ActiveBehavior {
         block9: {
             block8: {
                 Level level;
-                if (!animal.hasData(HerdAttachments.HERD_DATA)) {
+                if (!animal.hasData(ModAttachments.HERD_DATA)) {
                     return false;
                 }
-                HerdData data = (HerdData)animal.getData(HerdAttachments.HERD_DATA);
+                HerdData data = (HerdData)animal.getData(ModAttachments.HERD_DATA);
                 if (data.alpha()) {
                     return false;
                 }

@@ -1,24 +1,8 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.blaze3d.vertex.PoseStack
- *  com.mojang.blaze3d.vertex.VertexConsumer
- *  net.minecraft.client.model.geom.ModelPart
- *  net.minecraft.client.model.geom.PartPose
- *  net.minecraft.client.model.geom.builders.CubeDeformation
- *  net.minecraft.client.model.geom.builders.CubeListBuilder
- *  net.minecraft.client.model.geom.builders.LayerDefinition
- *  net.minecraft.client.model.geom.builders.MeshDefinition
- *  net.minecraft.client.model.geom.builders.PartDefinition
- *  net.minecraft.util.Mth
- *  net.minecraft.world.entity.animal.Cow
- */
 package com.charybdis180.ethological.client.sleep;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.client.sleep.SleepPose;
 import com.charybdis180.ethological.client.sleep.SleepingCowModel;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.model.geom.ModelPart;
@@ -87,12 +71,12 @@ extends SleepingCowModel {
 
     @Override
     public void setupAnim(Cow entity, float limbSwing, float limbSwingAmount, float ageInTicks, float netHeadYaw, float headPitch) {
-        boolean asleep = (Boolean)entity.getData(SleepAttachments.SLEEPING) != false || (Boolean)entity.getData(SleepAttachments.RESTING) != false;
+        boolean asleep = (Boolean)entity.getData(ModAttachments.SLEEPING) != false || (Boolean)entity.getData(ModAttachments.RESTING) != false;
         this.head.xRot = headPitch * ((float)Math.PI / 180);
         this.head.yRot = netHeadYaw * ((float)Math.PI / 180);
-        boolean sleeping = (Boolean)entity.getData(SleepAttachments.SLEEPING);
-        boolean resting = (Boolean)entity.getData(SleepAttachments.RESTING);
-        if (asleep) {
+        boolean sleeping = (Boolean)entity.getData(ModAttachments.SLEEPING);
+        boolean resting = (Boolean)entity.getData(ModAttachments.RESTING);
+        if (asleep && SleepPose.lieDownModelsEnabled()) {
             this.body.y = 23.0f;
             if (sleeping) {
                 this.head.y = 22.5f;

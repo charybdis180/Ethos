@@ -1,13 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.datafixers.kinds.App
- *  com.mojang.datafixers.kinds.Applicative
- *  com.mojang.serialization.Codec
- *  com.mojang.serialization.codecs.RecordCodecBuilder
- *  net.minecraft.core.UUIDUtil
- */
 package com.charybdis180.ethological.sleep;
 
 import com.mojang.serialization.Codec;

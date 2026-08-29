@@ -1,13 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.registries.Registries
- *  net.minecraft.resources.ResourceKey
- *  net.minecraft.resources.ResourceLocation
- *  net.minecraft.sounds.SoundEvent
- *  net.neoforged.neoforge.registries.DeferredRegister
- */
 package com.charybdis180.ethological;
 
 import java.util.function.Supplier;
@@ -18,7 +8,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 public final class ModSounds {
-    public static final DeferredRegister<SoundEvent> SOUND_EVENTS = DeferredRegister.create((ResourceKey)Registries.SOUND_EVENT, (String)"ethological");
+    public static final DeferredRegister<SoundEvent> SOUND_EVENTS = DeferredRegister.create(Registries.SOUND_EVENT, "ethological");
     public static final Supplier<SoundEvent> SHEEP_EAT = SOUND_EVENTS.register("entity.sheep.eat", () -> SoundEvent.createVariableRangeEvent((ResourceLocation)ResourceLocation.fromNamespaceAndPath((String)"ethological", (String)"entity.sheep.eat")));
     public static final Supplier<SoundEvent> COW_EAT = SOUND_EVENTS.register("entity.cow.eat", () -> SoundEvent.createVariableRangeEvent((ResourceLocation)ResourceLocation.fromNamespaceAndPath((String)"ethological", (String)"entity.cow.eat")));
     public static final Supplier<SoundEvent> PIG_EAT = SOUND_EVENTS.register("entity.pig.eat", () -> SoundEvent.createVariableRangeEvent((ResourceLocation)ResourceLocation.fromNamespaceAndPath((String)"ethological", (String)"entity.pig.eat")));

@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.google.gson.JsonElement
- *  com.google.gson.JsonObject
- *  net.minecraft.core.registries.BuiltInRegistries
- *  net.minecraft.resources.ResourceLocation
- *  net.minecraft.world.level.block.Block
- *  net.minecraft.world.level.block.Blocks
- */
 package com.charybdis180.ethological.hunger;
 
 import com.charybdis180.ethological.Ethological;

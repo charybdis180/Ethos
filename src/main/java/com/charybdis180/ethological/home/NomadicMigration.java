@@ -1,10 +1,9 @@
 package com.charybdis180.ethological.home;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.hunger.GrazePatches;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.hunger.HungerAttachments;
 import com.charybdis180.ethological.hunger.HungerSettingsManager;
 import com.charybdis180.ethological.hunger.SpeciesHungerSettings;
 import com.charybdis180.ethological.thirst.Thirst;
@@ -15,6 +14,7 @@ import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.level.Level;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,6 +47,9 @@ public final class NomadicMigration {
      * reachability query on miss, so its verdict is memoized a couple of seconds. */
     private static final long URGENT_FOOD_MEMO_TICKS = 40L;
     private static final Map<UUID, long[]> URGENT_FOOD_MEMO = new ConcurrentHashMap<>();
+    /** TTL for {@link #canSatisfyUrgentThirstNow}; see the food memo above. */
+    private static final long URGENT_THIRST_MEMO_TICKS = 40L;
+    private static final Map<UUID, long[]> URGENT_THIRST_MEMO = new ConcurrentHashMap<>();
 
     private NomadicMigration() {
     }
@@ -104,12 +107,12 @@ public final class NomadicMigration {
     public static void beginNeedsPause(Animal animal) {
         Animal owner = scheduleOwner(animal);
         long now = owner.level().getGameTime();
-        long current = owner.getData(HomeAttachments.MIGRATION_PAUSE_UNTIL);
+        long current = owner.getData(ModAttachments.MIGRATION_PAUSE_UNTIL);
         if (current > now) {
             return;
         }
-        owner.setData(HomeAttachments.MIGRATION_PAUSE_UNTIL, now + NEEDS_PAUSE_SEGMENT);
-        owner.setData(HomeAttachments.NEEDS_PAUSE_UNTIL, now + NEEDS_HOLD_MAX_TICKS);
+        owner.setData(ModAttachments.MIGRATION_PAUSE_UNTIL, now + NEEDS_PAUSE_SEGMENT);
+        owner.setData(ModAttachments.NEEDS_PAUSE_UNTIL, now + NEEDS_HOLD_MAX_TICKS);
     }
 
     /** Re-assert a needs pause each tick while the herd still wants food/drink so a
@@ -129,43 +132,43 @@ public final class NomadicMigration {
         if (isInNeedsMarchWindow(owner, now)) {
             return;
         }
-        long pauseUntil = owner.getData(HomeAttachments.MIGRATION_PAUSE_UNTIL);
+        long pauseUntil = owner.getData(ModAttachments.MIGRATION_PAUSE_UNTIL);
         if (pauseUntil <= now) {
-            if (owner.getData(HomeAttachments.NEEDS_PAUSE_UNTIL) != 0L) {
-                owner.removeData(HomeAttachments.NEEDS_PAUSE_UNTIL);
+            if (owner.getData(ModAttachments.NEEDS_PAUSE_UNTIL) != 0L) {
+                owner.removeData(ModAttachments.NEEDS_PAUSE_UNTIL);
             }
             return;
         }
         if (!shouldPauseForNeeds(owner)) {
             return;
         }
-        long cap = owner.getData(HomeAttachments.NEEDS_PAUSE_UNTIL);
+        long cap = owner.getData(ModAttachments.NEEDS_PAUSE_UNTIL);
         if (cap == 0L) {
             // A needs pause should have armed the cap; do it now so the pause is
             // held long enough for a real meal (capped so a foodless area resumes).
             cap = now + NEEDS_HOLD_MAX_TICKS;
-            owner.setData(HomeAttachments.NEEDS_PAUSE_UNTIL, cap);
+            owner.setData(ModAttachments.NEEDS_PAUSE_UNTIL, cap);
         } else if (now >= cap) {
             // Cap reached without satisfying the herd: end the needs pause and let
             // the herd resume marching to search fresh ground.
-            owner.setData(HomeAttachments.MIGRATION_PAUSE_UNTIL, 0L);
-            owner.removeData(HomeAttachments.NEEDS_PAUSE_UNTIL);
-            owner.setData(HomeAttachments.NEEDS_MARCH_UNTIL, now + NEEDS_MARCH_WINDOW);
+            owner.setData(ModAttachments.MIGRATION_PAUSE_UNTIL, 0L);
+            owner.removeData(ModAttachments.NEEDS_PAUSE_UNTIL);
+            owner.setData(ModAttachments.NEEDS_MARCH_UNTIL, now + NEEDS_MARCH_WINDOW);
             return;
         }
-        owner.setData(HomeAttachments.MIGRATION_PAUSE_UNTIL, now + NEEDS_PAUSE_SEGMENT);
+        owner.setData(ModAttachments.MIGRATION_PAUSE_UNTIL, now + NEEDS_PAUSE_SEGMENT);
     }
 
     /** True while the post-cap march window suppresses urgent-need migration interrupts,
      * so a foodless region is actually searched rather than re-pausing every few ticks. */
     public static boolean isInNeedsMarchWindow(Animal animal, long now) {
         Animal owner = scheduleOwner(animal);
-        long until = owner.getData(HomeAttachments.NEEDS_MARCH_UNTIL);
+        long until = owner.getData(ModAttachments.NEEDS_MARCH_UNTIL);
         if (until > now) {
             return true;
         }
         if (until != 0L) {
-            owner.removeData(HomeAttachments.NEEDS_MARCH_UNTIL);
+            owner.removeData(ModAttachments.NEEDS_MARCH_UNTIL);
         }
         return false;
     }
@@ -202,46 +205,86 @@ public final class NomadicMigration {
         return result;
     }
 
+    /**
+     * Water twin of {@link #canSatisfyUrgentFoodNow}: true when the schedule owner is
+     * urgently thirsty AND a water surface stands within the species search radius. The
+     * post-cap march window only suppresses urgent migration interrupts while the herd is
+     * searching waterless ground; the moment reachable water appears (rain pool, player-
+     * placed source), a dehydrating alpha must break the march and drink instead of
+     * marching past it. Memoized like the food probe; the candidate list comes from the
+     * shared WATER_CANDIDATE_CACHE so repeat probes cost one map read.
+     */
+    public static boolean canSatisfyUrgentThirstNow(Animal owner) {
+        if (!Thirst.hasThirstData(owner) || !Thirst.isUrgentlyThirsty(owner)) {
+            return false;
+        }
+        long now = owner.level().getGameTime();
+        UUID key = owner.getUUID();
+        long[] rec = URGENT_THIRST_MEMO.get(key);
+        if (rec != null && now - rec[0] < URGENT_THIRST_MEMO_TICKS) {
+            return rec[1] == 1L;
+        }
+        boolean result = false;
+        Optional<BlockPos> home = com.charybdis180.ethological.home.Homes.effectiveHome(owner);
+        int radius = HomeSettingsManager.get(owner.getType())
+                .map(s -> s.waterSearchRadius())
+                .orElse(com.charybdis180.ethological.thirst.goal.DrinkWaterGoal.HOMELESS_WATER_RADIUS);
+        BlockPos center = home.isPresent() ? home.get() : owner.blockPosition();
+        List<BlockPos> candidates = Homes.findWaterCandidates(
+                (Level) owner.level(), center, radius, java.util.Set.of(), 4);
+        for (BlockPos surface : candidates) {
+            if (Homes.isReachable((PathfinderMob) owner, surface)) {
+                result = true;
+                break;
+            }
+        }
+        if (URGENT_THIRST_MEMO.size() > 128) {
+            URGENT_THIRST_MEMO.clear();
+        }
+        URGENT_THIRST_MEMO.put(key, new long[]{now, result ? 1L : 0L});
+        return result;
+    }
+
     public static void beginTravelLeg(Animal animal) {
-        scheduleOwner(animal).setData(HomeAttachments.MIGRATION_PAUSE_UNTIL, 0L);
+        scheduleOwner(animal).setData(ModAttachments.MIGRATION_PAUSE_UNTIL, 0L);
     }
 
     public static void beginPause(Animal animal, int ticks) {
         long until = animal.level().getGameTime() + Math.max(1, ticks);
-        scheduleOwner(animal).setData(HomeAttachments.MIGRATION_PAUSE_UNTIL, until);
+        scheduleOwner(animal).setData(ModAttachments.MIGRATION_PAUSE_UNTIL, until);
     }
 
     public static void ensureHeading(Animal animal) {
         Animal owner = scheduleOwner(animal);
-        if (!owner.hasData(HomeAttachments.NOMAD_HEADING)
-                || Double.isNaN(owner.getData(HomeAttachments.NOMAD_HEADING))) {
-            owner.setData(HomeAttachments.NOMAD_HEADING,
+        if (!owner.hasData(ModAttachments.NOMAD_HEADING)
+                || Double.isNaN(owner.getData(ModAttachments.NOMAD_HEADING))) {
+            owner.setData(ModAttachments.NOMAD_HEADING,
                     owner.getRandom().nextDouble() * (Math.PI * 2.0D));
         }
     }
 
     /** True while a recently committed heading turn is still cooling down. */
     public static boolean isTurnBlocked(Animal owner) {
-        return owner.level().getGameTime() < owner.getData(HomeAttachments.NOMAD_TURN_UNTIL);
+        return owner.level().getGameTime() < owner.getData(ModAttachments.NOMAD_TURN_UNTIL);
     }
 
     public static void beginTurnBlock(Animal owner) {
-        owner.setData(HomeAttachments.NOMAD_TURN_UNTIL,
+        owner.setData(ModAttachments.NOMAD_TURN_UNTIL,
                 owner.level().getGameTime() + TURN_COOLDOWN_TICKS);
     }
 
     /** Clears spawn-patch grazing so a nomadic alpha can march instead of camping on grass. */
     public static void resetGrazeAnchor(Animal alpha) {
-        alpha.removeData(HungerAttachments.GRAZE_PATCH);
-        alpha.removeData(HungerAttachments.FOOD_TARGET);
-        alpha.removeData(HungerAttachments.RUMINATE_UNTIL);
+        alpha.removeData(ModAttachments.GRAZE_PATCH);
+        alpha.removeData(ModAttachments.FOOD_TARGET);
+        alpha.removeData(ModAttachments.RUMINATE_UNTIL);
     }
 
     public static Animal scheduleOwner(Animal animal) {
-        if (animal.hasData(HerdAttachments.HERD_DATA)
-                && !animal.getData(HerdAttachments.HERD_DATA).alpha()
+        if (animal.hasData(ModAttachments.HERD_DATA)
+                && !animal.getData(ModAttachments.HERD_DATA).alpha()
                 && animal.level() instanceof ServerLevel serverLevel) {
-            HerdManager.Herd herd = HerdManager.get(animal.getData(HerdAttachments.HERD_DATA).herdId());
+            HerdManager.Herd herd = HerdManager.get(animal.getData(ModAttachments.HERD_DATA).herdId());
             if (herd != null && herd.alphaId != null) {
                 Entity alpha = serverLevel.getEntity(herd.alphaId);
                 if (alpha instanceof Animal alphaAnimal) {
@@ -253,6 +296,6 @@ public final class NomadicMigration {
     }
 
     private static long pauseUntil(Animal owner) {
-        return owner.getData(HomeAttachments.MIGRATION_PAUSE_UNTIL);
+        return owner.getData(ModAttachments.MIGRATION_PAUSE_UNTIL);
     }
 }

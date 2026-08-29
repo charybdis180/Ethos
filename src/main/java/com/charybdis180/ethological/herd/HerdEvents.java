@@ -1,30 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.server.packs.resources.PreparableReloadListener
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.ai.goal.FollowParentGoal
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.WrappedGoal
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.entity.animal.Wolf
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.AABB
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.AddReloadListenerEvent
- *  net.neoforged.neoforge.event.entity.EntityJoinLevelEvent
- *  net.neoforged.neoforge.event.entity.living.LivingDamageEvent$Pre
- *  net.neoforged.neoforge.event.server.ServerStoppingEvent
- *  net.neoforged.neoforge.event.tick.EntityTickEvent$Post
- */
 package com.charybdis180.ethological.herd;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.Ethological;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
@@ -37,12 +14,10 @@ import com.charybdis180.ethological.herd.goal.HerdWaryGoal;
 import com.charybdis180.ethological.herd.goal.NurseGoal;
 import com.charybdis180.ethological.herd.goal.ScatterGoal;
 import com.charybdis180.ethological.home.FenceDetection;
-import com.charybdis180.ethological.home.HomeAttachments;
 import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.home.HomeSettingsManager;
 import com.charybdis180.ethological.home.NomadicMigration;
 import com.charybdis180.ethological.home.SpeciesHomeSettings;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepDisturbance;
 import com.charybdis180.ethological.sleep.SleepEvents;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
@@ -95,18 +70,29 @@ public final class HerdEvents {
     // (the logs showed 90 grace-start / 0 grace-skip on the same members).
     private static final java.util.Map<UUID, java.util.Map<UUID, Long>> separatedSince = new HashMap<>();
 
+    /** Per-animal cooldown between escape-driven secession attempts (600t = 30s, matching
+     *  the watchdog release cadence that feeds this path). */
+    private static final long SECEDE_RATE_LIMIT_TICKS = 600L;
+    /** Per-herd interval for the alpha's pen-enclosure check. FenceDetection's verdict is
+     *  cached ~200t per region, so this rate limit costs nothing extra. */
+    private static final long ALPHA_PEN_CHECK_TICKS = 200L;
+    private static final java.util.Map<UUID, Long> nextSecedeAttemptGameTime = new HashMap<>();
+    private static final java.util.Map<UUID, Long> alphaPenCheckGameTime = new HashMap<>();
+
     private HerdEvents() {
     }
 
     @SubscribeEvent
     public static void onAddReloadListeners(AddReloadListenerEvent event) {
-        event.addListener((PreparableReloadListener)new HerdSettingsManager());
+        event.addListener(new HerdSettingsManager());
     }
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         HerdManager.clear();
         separatedSince.clear();
+        nextSecedeAttemptGameTime.clear();
+        alphaPenCheckGameTime.clear();
     }
 
     @SubscribeEvent
@@ -122,6 +108,9 @@ public final class HerdEvents {
         HerdManager.evictEmptyHerds((ServerLevel)level);
         // Drop grace timers for herds that no longer exist (merged/evicted) so the map cannot grow.
         separatedSince.keySet().removeIf(herdId -> HerdManager.get(herdId) == null);
+        // Same housekeeping for the secession cooldown and alpha pen-check maps: entries for
+        // animals whose entity is gone are dead weight.
+        nextSecedeAttemptGameTime.keySet().removeIf(id -> ((ServerLevel)level).getEntity(id) == null);        alphaPenCheckGameTime.keySet().removeIf(herdId -> HerdManager.get(herdId) == null);
     }
 
     @SubscribeEvent
@@ -140,8 +129,8 @@ public final class HerdEvents {
         // Warm the in-memory herd registry immediately so herd-scoped logic (e.g. the
         // alpha-only water search relay in DrinkWaterGoal) engages from the first tick
         // after a chunk load, instead of waiting up to 100 ticks for the herd_tick gate.
-        if (animal.hasData(HerdAttachments.HERD_DATA)) {
-            HerdData data = animal.getData(HerdAttachments.HERD_DATA);
+        if (animal.hasData(ModAttachments.HERD_DATA)) {
+            HerdData data = animal.getData(ModAttachments.HERD_DATA);
             HerdManager.Herd herd = HerdManager.getOrCreate(data.herdId(), animal.getUUID());
             herd.members.add(animal.getUUID());
             if (data.alpha() && !animal.isBaby()) {
@@ -185,13 +174,13 @@ public final class HerdEvents {
         }
         SpeciesHerdSettings settings = settingsOpt.get();
         long now = animal.level().getGameTime();
-        if (animal.isBaby() && animal.hasData(HerdAttachments.MOTHER)
+        if (animal.isBaby() && animal.hasData(ModAttachments.MOTHER)
                 && com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "mother_tick", now, 20L)) {
             HerdEvents.tickBabyMother(serverLevel, animal, now);
         }
-        if (animal.hasData(HerdAttachments.HERD_DATA)
+        if (animal.hasData(ModAttachments.HERD_DATA)
                 && com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "wary_resatter", now, 5L)
-                && (herd = HerdManager.get(((HerdData)animal.getData(HerdAttachments.HERD_DATA)).herdId())) != null
+                && (herd = HerdManager.get(((HerdData)animal.getData(ModAttachments.HERD_DATA)).herdId())) != null
                 && herd.threatId() != null
                 && herd.phaseAt(serverLevel, now, animal) == HerdManager.PanicPhase.WARY) {
             Entity threat = serverLevel.getEntity(herd.threatId());
@@ -205,36 +194,36 @@ public final class HerdEvents {
             return;
         }
         // One wolf scan per herd (the alpha's), with the radius widened to cover the herd spread.
-        if (animal.hasData(HerdAttachments.HERD_DATA) && ((HerdData)animal.getData(HerdAttachments.HERD_DATA)).alpha()) {
+        if (animal.hasData(ModAttachments.HERD_DATA) && ((HerdData)animal.getData(ModAttachments.HERD_DATA)).alpha()) {
             HerdEvents.tryAlertNearbyWolf(serverLevel, animal, settings, now);
         }
-        if (!animal.hasData(HerdAttachments.HERD_DATA)) {
-            if (animal.isBaby() && animal.hasData(HerdAttachments.MOTHER)) {
-                MotherData motherLink = (MotherData)animal.getData(HerdAttachments.MOTHER);
+        if (!animal.hasData(ModAttachments.HERD_DATA)) {
+            if (animal.isBaby() && animal.hasData(ModAttachments.MOTHER)) {
+                MotherData motherLink = (MotherData)animal.getData(ModAttachments.MOTHER);
                 if (motherLink.isActive(now)) {
                     Animal motherAnimal;
                     UUID motherId = motherLink.motherId();
                     Entity mother = serverLevel.getEntity(motherId);
-                    if (mother instanceof Animal && (motherAnimal = (Animal)mother).hasData(HerdAttachments.HERD_DATA)) {
-                        UUID herdId = ((HerdData)motherAnimal.getData(HerdAttachments.HERD_DATA)).herdId();
+                    if (mother instanceof Animal && (motherAnimal = (Animal)mother).hasData(ModAttachments.HERD_DATA)) {
+                        UUID herdId = ((HerdData)motherAnimal.getData(ModAttachments.HERD_DATA)).herdId();
                         HerdManager.Herd herd2 = HerdManager.getOrCreate(herdId, motherId);
                         herd2.members.add(animal.getUUID());
-                        animal.setData(HerdAttachments.HERD_DATA, new HerdData(herd2.id, false));
+                        animal.setData(ModAttachments.HERD_DATA, new HerdData(herd2.id, false));
                     }
                     return;
                 }
-                animal.removeData(HerdAttachments.MOTHER);
+                animal.removeData(ModAttachments.MOTHER);
             }
             HerdEvents.tryJoinOrFormHerd(serverLevel, animal, settings);
             return;
         }
-        HerdData data = (HerdData)animal.getData(HerdAttachments.HERD_DATA);
+        HerdData data = (HerdData)animal.getData(ModAttachments.HERD_DATA);
         HerdManager.Herd herd3 = HerdManager.getOrCreate(data.herdId(), animal.getUUID());
         herd3.members.add(animal.getUUID());
         // Never let a baby's alpha attachment flag claim leadership.
         if (data.alpha() && animal.isBaby()) {
-            animal.setData(HerdAttachments.HERD_DATA, new HerdData(herd3.id, false));
-            data = (HerdData)animal.getData(HerdAttachments.HERD_DATA);
+            animal.setData(ModAttachments.HERD_DATA, new HerdData(herd3.id, false));
+            data = (HerdData)animal.getData(ModAttachments.HERD_DATA);
             if (animal.getUUID().equals(herd3.alphaId)) {
                 UUID elected = HerdManager.electAlpha(serverLevel, herd3.members);
                 if (elected != null) {
@@ -254,9 +243,52 @@ public final class HerdEvents {
             isAlpha = animal.getUUID().equals(herd3.alphaId);
         }
         if (isAlpha) {
+            // Pen-enclosure check (section 2b): a penned alpha's herd is definitionally
+            // together — mark it cap-free and skip the split pass this tick. The verdict is
+            // FenceDetection-cached and per-herd rate-limited; once the pen opens the flag is
+            // cleared and the normal split pass resumes as the terrain-separation safety net.
+            if (herd3.penHerd) {
+                Long lastCheck = alphaPenCheckGameTime.get(herd3.id);
+                if (lastCheck == null || now - lastCheck >= ALPHA_PEN_CHECK_TICKS) {
+                    alphaPenCheckGameTime.put(herd3.id, now);
+                    if (!FenceDetection.isFencedIn(animal)) {
+                        herd3.penHerd = false;
+                    } else {
+                        // Containment sweep: members standing outside the enclosure can never
+                        // reach the alpha's huddle (the split pass is skipped for pen herds),
+                        // so they would trail at the fence forever. Eject them to unherded
+                        // status; normal join/wander logic takes over away from the pen.
+                        // Babies stay — they trail their mothers and cannot rejoin alone.
+                        LongSet penRegion = FenceDetection.pennedRegionOf(animal);
+                        if (penRegion != null) {
+                            int refY = animal.blockPosition().getY();
+                            for (UUID memberId : java.util.List.copyOf(herd3.members)) {
+                                if (memberId.equals(animal.getUUID())) {
+                                    continue;
+                                }
+                                Entity m = serverLevel.getEntity(memberId);
+                                if (!(m instanceof Animal mate) || mate.isBaby()) {
+                                    continue;
+                                }
+                                if (FenceDetection.excludes(serverLevel, penRegion, mate.blockPosition(), refY)) {
+                                    HerdManager.removeFromHerd(serverLevel, mate, herd3);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Long lastCheck = alphaPenCheckGameTime.get(herd3.id);
+                if (lastCheck == null || now - lastCheck >= ALPHA_PEN_CHECK_TICKS) {
+                    alphaPenCheckGameTime.put(herd3.id, now);
+                    if (FenceDetection.isFencedIn(animal)) {
+                        herd3.penHerd = true;
+                    }
+                }
+            }
             // Compute the alpha's reachable region once and share it between the split and merge
             // passes — both were flooding the same 32-block radius back-to-back every herd tick.
-            LongSet alphaRegion = HerdEvents.splitFencedOffMembers(serverLevel, animal, herd3, settings);
+            LongSet alphaRegion = herd3.penHerd ? null : HerdEvents.splitFencedOffMembers(serverLevel, animal, herd3, settings);
             HerdEvents.tryMergeNearbyHerds(serverLevel, animal, herd3, settings, alphaRegion);
             if (herd3.phaseAt(serverLevel, now, animal) == HerdManager.PanicPhase.GATHER) {
                 boolean regrouped = herd3.members.stream().map(arg_0 -> ((ServerLevel)serverLevel).getEntity(arg_0)).filter(e -> e instanceof Animal).allMatch(e -> (double)e.distanceTo((Entity)animal) <= settings.followDistance());
@@ -282,13 +314,16 @@ public final class HerdEvents {
     }
 
     private static void tryMergeNearbyHerds(ServerLevel level, Animal alpha, HerdManager.Herd self, SpeciesHerdSettings settings, LongSet sharedRegion) {
-        if (HerdManager.adultCount(level, self) >= settings.maxSize()) {
+        // Pen herds ignore the adult cap: their size is bounded by the enclosure, not the
+        // wild pack ceiling. Cross-enclosure merges stay impossible — candidates must pass
+        // canRejoin against the alpha's flood region below.
+        if (!self.penHerd && HerdManager.adultCount(level, self) >= settings.maxSize()) {
             return;
         }
         if (self.isPanicking()) {
             return;
         }
-        List<Animal> nearby = level.getEntitiesOfClass(Animal.class, alpha.getBoundingBox().inflate((double)settings.joinRadius()), other -> other != alpha && other.getType() == alpha.getType() && other.hasData(HerdAttachments.HERD_DATA));
+        List<Animal> nearby = level.getEntitiesOfClass(Animal.class, alpha.getBoundingBox().inflate((double)settings.joinRadius()), other -> other != alpha && other.getType() == alpha.getType() && other.hasData(ModAttachments.HERD_DATA));
         if (nearby.isEmpty()) {
             return;
         }
@@ -302,7 +337,7 @@ public final class HerdEvents {
         ArrayList<Animal> mergeable = new ArrayList<Animal>();
         for (Animal other2 : nearby) {
             HerdManager.Herd otherHerd;
-            UUID otherHerdId = ((HerdData)other2.getData(HerdAttachments.HERD_DATA)).herdId();
+            UUID otherHerdId = ((HerdData)other2.getData(ModAttachments.HERD_DATA)).herdId();
             if (!seen.add(otherHerdId) || (otherHerd = HerdManager.get(otherHerdId)) == null || otherHerd.members.isEmpty() || otherHerd.isPanicking() || HerdManager.adultCount(level, otherHerd) == 0) continue;
             mergeable.add(other2);
         }
@@ -317,7 +352,7 @@ public final class HerdEvents {
         for (Animal other2 : mergeable) {
             HerdManager.Herd absorbed;
             HerdManager.Herd survivor;
-            HerdManager.Herd otherHerd = HerdManager.get(((HerdData)other2.getData(HerdAttachments.HERD_DATA)).herdId());
+            HerdManager.Herd otherHerd = HerdManager.get(((HerdData)other2.getData(ModAttachments.HERD_DATA)).herdId());
             if (otherHerd == null || !FenceDetection.canRejoin((Level)level, alphaRegion, other2.blockPosition(), alphaPos.getY())) continue;
             if (self.members.size() > otherHerd.members.size() || self.members.size() == otherHerd.members.size() && self.id.toString().compareTo(otherHerd.id.toString()) <= 0) {
                 survivor = self;
@@ -327,12 +362,13 @@ public final class HerdEvents {
                 absorbed = self;
             }
             int room = settings.maxSize() - HerdManager.adultCount(level, survivor);
-            if (room <= 0) continue;
-            HerdManager.mergeInto(level, survivor, absorbed, room);
+            // A pen-herd survivor has no room limit (enclosure-bounded population).
+            if (room <= 0 && !survivor.penHerd) continue;
+            HerdManager.mergeInto(level, survivor, absorbed, survivor.penHerd ? Integer.MAX_VALUE : room);
             if (HerdManager.get(self.id) != self) {
                 return;
             }
-            if (HerdManager.adultCount(level, self) < settings.maxSize()) continue;
+            if (!self.penHerd && HerdManager.adultCount(level, self) < settings.maxSize()) continue;
             return;
         }
     }
@@ -347,7 +383,7 @@ public final class HerdEvents {
         // neighborhood of only babies makes the flood wasted work.
         boolean hasCandidate = false;
         for (Animal other : nearby) {
-            if (other.hasData(HerdAttachments.HERD_DATA) || !other.isBaby()) {
+            if (other.hasData(ModAttachments.HERD_DATA) || !other.isBaby()) {
                 hasCandidate = true;
                 break;
             }
@@ -362,10 +398,21 @@ public final class HerdEvents {
         LongSet selfRegion = FenceDetection.reachableColumns((Level)level, selfPos.getX(), selfPos.getZ(), selfPos.getY(), settings.joinRadius());
         for (Animal other2 : nearby) {
             if (!FenceDetection.canRejoin((Level)level, selfRegion, other2.blockPosition(), selfPos.getY())) continue;
-            if (other2.hasData(HerdAttachments.HERD_DATA)) {
+            if (other2.hasData(ModAttachments.HERD_DATA)) {
                 double distance;
-                HerdManager.Herd herd = HerdManager.get(((HerdData)other2.getData(HerdAttachments.HERD_DATA)).herdId());
-                if (herd == null || HerdManager.adultCount(level, herd) >= settings.maxSize() || !((distance = other2.distanceToSqr((Entity)animal)) < bestDistance)) continue;
+                HerdManager.Herd herd = HerdManager.get(((HerdData)other2.getData(ModAttachments.HERD_DATA)).herdId());
+                // Pen herds accept joiners past the cap — but ONLY from inside the enclosure:
+                // an outsider lured by a penned member would trail the fence forever, since it
+                // can never be led in. The member's pen region is the enclosure of record; an
+                // unresolvable region (member itself not enclosed) rejects too.
+                if (herd != null && herd.penHerd) {
+                    LongSet targetPen = FenceDetection.pennedRegionOf(other2);
+                    if (targetPen == null || FenceDetection.excludes((Level)level, targetPen, selfPos, selfPos.getY())) {
+                        continue;
+                    }
+                }
+                boolean capOk = herd.penHerd || HerdManager.adultCount(level, herd) < settings.maxSize();
+                if (herd == null || !capOk || !((distance = other2.distanceToSqr((Entity)animal)) < bestDistance)) continue;
                 bestHerd = herd;
                 bestDistance = distance;
                 continue;
@@ -377,7 +424,7 @@ public final class HerdEvents {
         }
         if (bestHerd != null) {
             bestHerd.members.add(animal.getUUID());
-            animal.setData(HerdAttachments.HERD_DATA, new HerdData(bestHerd.id, false));
+            animal.setData(ModAttachments.HERD_DATA, new HerdData(bestHerd.id, false));
             Ethological.LOGGER.debug("Ethological: {} joined herd {} ({} members)", new Object[]{animal.getType(), bestHerd.id, bestHerd.members.size()});
             return;
         }
@@ -398,9 +445,9 @@ public final class HerdEvents {
         }
         HerdManager.Herd herd = HerdManager.create(alphaId);
         herd.members.addAll(ids);
-        animal.setData(HerdAttachments.HERD_DATA, new HerdData(herd.id, animal.getUUID().equals(alphaId)));
+        animal.setData(ModAttachments.HERD_DATA, new HerdData(herd.id, animal.getUUID().equals(alphaId)));
         for (Animal founder : founders) {
-            founder.setData(HerdAttachments.HERD_DATA, new HerdData(herd.id, founder.getUUID().equals(alphaId)));
+            founder.setData(ModAttachments.HERD_DATA, new HerdData(herd.id, founder.getUUID().equals(alphaId)));
         }
         Ethological.LOGGER.debug("Ethological: formed herd {} with {} members (alpha {})", new Object[]{herd.id, herd.members.size(), alphaId});
         HerdEvents.prepareNomadicAlpha(level, alphaId);
@@ -452,7 +499,7 @@ public final class HerdEvents {
         // ejected, so the flood fill is pure waste. Only pay for reachability when someone is far.
         boolean anyBeyondMargin = false;
         for (Map.Entry<UUID, BlockPos> entry : candidates.entrySet()) {
-            double d = Math.sqrt(alpha.distanceToSqr(Vec3.atCenterOf((Vec3i)entry.getValue())));
+            double d = Math.sqrt(alpha.distanceToSqr(Vec3.atCenterOf(entry.getValue())));
             if (d > straggleThreshold) {
                 anyBeyondMargin = true;
                 break;
@@ -477,7 +524,7 @@ public final class HerdEvents {
         long now = level.getGameTime();
         for (Map.Entry<UUID, BlockPos> entry : candidates.entrySet()) {
             BlockPos memberPos = entry.getValue();
-            double memberDist = Math.sqrt(alpha.distanceToSqr(Vec3.atCenterOf((Vec3i)memberPos)));
+            double memberDist = Math.sqrt(alpha.distanceToSqr(Vec3.atCenterOf(memberPos)));
             if (memberDist <= straggleThreshold) {
                 herdGrace.remove(entry.getKey());
                 continue;
@@ -540,7 +587,7 @@ public final class HerdEvents {
         for (UUID memberId : herd.members) {
             Animal baby;
             Object e;
-            if (departing.contains(memberId) || !((e = level.getEntity(memberId)) instanceof Animal) || !(baby = (Animal)e).isBaby() || !baby.hasData(HerdAttachments.MOTHER) || !departing.contains(((MotherData)baby.getData(HerdAttachments.MOTHER)).motherId())) continue;
+            if (departing.contains(memberId) || !((e = level.getEntity(memberId)) instanceof Animal) || !(baby = (Animal)e).isBaby() || !baby.hasData(ModAttachments.MOTHER) || !departing.contains(((MotherData)baby.getData(ModAttachments.MOTHER)).motherId())) continue;
             departing.add(memberId);
         }
         UUID newAlphaId = HerdManager.electAlpha(level, departing);
@@ -551,7 +598,7 @@ public final class HerdEvents {
             Entity e = level.getEntity(id);
             if (!(e instanceof Animal)) continue;
             Animal animal = (Animal)e;
-            animal.setData(HerdAttachments.HERD_DATA,new HerdData(newHerd.id, id.equals(newAlphaId)));
+            animal.setData(ModAttachments.HERD_DATA,new HerdData(newHerd.id, id.equals(newAlphaId)));
         }
         Entity alphaEntity = level.getEntity(newAlphaId);
         if (alphaEntity instanceof Animal newAlphaAnimal) {
@@ -561,19 +608,198 @@ public final class HerdEvents {
             HomeData home = nomadic
                     ? new HomeData(newAlphaAnimal.blockPosition(), true)
                     : new HomeData(newAlphaAnimal.blockPosition());
-            newAlphaAnimal.setData(HomeAttachments.HOME, home);
+            newAlphaAnimal.setData(ModAttachments.HOME, home);
             for (UUID id : departing) {
                 Entity e = level.getEntity(id);
                 if (id.equals(newAlphaId) || !(e instanceof Animal animal)) {
                     continue;
                 }
-                animal.setData(HomeAttachments.HOME, home);
+                animal.setData(ModAttachments.HOME, home);
             }
             if (nomadic) {
                 HerdEvents.prepareNomadicAlpha(level, newAlphaId);
             }
         }
         Ethological.LOGGER.debug("Ethological: fenced-off herd members {} split into new herd {} (alpha {})", new Object[]{departing.size(), newHerd.id, newAlphaId});
+    }
+
+    /**
+     * Escape-driven fence secession. Called from FollowAlphaGoal's watchdog release branch,
+     * i.e. only after ~30s of proven immobility with every escape fallback exhausted — the
+     * strongest available evidence the animal is trapped. Confirms the trap with
+     * FenceDetection (cached per pen region), then moves the animal and its pen-mates into a
+     * single cap-free pen herd so the penned population stops fighting a follow leash it can
+     * never satisfy.
+     *
+     * <p>Ordered cheap guards first: an animal whose herd is already flagged penHerd early-outs
+     * in O(1) because a pen-mate already converted this pen; the per-animal rate limit keeps
+     * repeated watchdog firings from re-probing; panic/alpha guards keep secession out of
+     * fleeing or leaderless herds.</p>
+     */
+    public static void trySecedeIfFencedIn(Animal animal) {
+        if (!(animal.level() instanceof ServerLevel serverLevel) || !animal.hasData(ModAttachments.HERD_DATA)) {
+            return;
+        }
+        long now = serverLevel.getGameTime();
+        Long cooldown = nextSecedeAttemptGameTime.get(animal.getUUID());
+        if (cooldown != null && now < cooldown) {
+            return;
+        }
+        nextSecedeAttemptGameTime.put(animal.getUUID(), now + SECEDE_RATE_LIMIT_TICKS);
+        HerdData data = (HerdData)animal.getData(ModAttachments.HERD_DATA);
+        HerdManager.Herd herd = HerdManager.get(data.herdId());
+        // Already inside a converted pen herd: a pen-mate did the work earlier.
+        if (herd != null && herd.penHerd) {
+            return;
+        }
+        // Never secede mid-panic; never secede when our own herd is effectively leaderless
+        // (reconciliation owns that case).
+        if (herd == null || herd.alphaId == null || HerdManager.panicPhaseOf(animal, now) != HerdManager.PanicPhase.NONE || !HerdManager.isAlphaResolvable(serverLevel, herd)) {
+            return;
+        }
+        if (animal.isBaby()) {
+            return;
+        }
+        Entity alphaEntity = serverLevel.getEntity(herd.alphaId);
+        if (!(alphaEntity instanceof Animal alphaAnimal)) {
+            return;
+        }
+        // The pen check itself is the expensive part; FenceDetection shares one cached verdict
+        // across every occupant of the same enclosure region.
+        if (!FenceDetection.isFencedIn(animal)) {
+            return;
+        }
+        LongSet penRegion = FenceDetection.regionOf(animal);
+        HerdEvents.secedePen(serverLevel, animal, herd, penRegion);
+    }
+
+    /**
+     * Moves {@code trigger} and every compatible pen-mate into one cap-free pen herd.
+     * Pen-mates are: unherded adults in the region, members of herds whose alpha lies OUTSIDE
+     * the region (their herd cannot reach them anyway), and their dependent babies. Members of
+     * healthy herds whose alpha is INSIDE the region are left alone — that herd is together
+     * and will be marked by its own alpha (section 2b).
+     */
+    private static void secedePen(ServerLevel level, Animal trigger, HerdManager.Herd oldHerd, LongSet penRegion) {
+        BlockPos triggerPos = trigger.blockPosition();
+        SpeciesHerdSettings settings = HerdSettingsManager.get(trigger.getType()).orElse(null);
+        int radius = settings != null ? settings.joinRadius() : 32;
+        List<Animal> nearby = level.getEntitiesOfClass(Animal.class,
+                trigger.getBoundingBox().inflate(radius),
+                other -> other.getType() == trigger.getType()
+                        && FenceDetection.canRejoin(level, penRegion, other.blockPosition(), triggerPos.getY()));
+        UUID newAlphaId = null;
+        HerdManager.Herd targetPen = null;
+        ArrayList<Animal> joining = new ArrayList<>();
+        joining.add(trigger);
+        for (Animal mate : nearby) {
+            if (!mate.isAlive() || mate.isBaby()) {
+                continue;
+            }
+            if (mate.hasData(ModAttachments.HERD_DATA)) {
+                HerdData mateData = (HerdData)mate.getData(ModAttachments.HERD_DATA);
+                HerdManager.Herd mateHerd = HerdManager.get(mateData.herdId());
+                if (mateHerd == null) {
+                    continue;
+                }
+                if (mateHerd.penHerd) {
+                    // An existing pen herd in this pen absorbs everything below.
+                    targetPen = mateHerd;
+                    continue;
+                }
+                Entity mateAlpha = mateHerd.alphaId != null ? level.getEntity(mateHerd.alphaId) : null;
+                boolean alphaInPen = mateAlpha instanceof Animal ma
+                        && FenceDetection.canRejoin(level, penRegion, ma.blockPosition(), triggerPos.getY());
+                if (alphaInPen) {
+                    // Together herd led from inside the pen: leave it to section 2b marking.
+                    continue;
+                }
+                // Orphaned member: its herd's leadership is outside the fence.
+                joining.add(mate);
+                continue;
+            }
+            // Unherded adult standing in the pen.
+            joining.add(mate);
+        }
+        // Babies follow their mothers into the pen herd (never seed or lead it).
+        HashSet<UUID> joiningIds = new HashSet<>();
+        for (Animal j : joining) {
+            joiningIds.add(j.getUUID());
+        }
+        ArrayList<Animal> babies = new ArrayList<>();
+        for (Animal mate : nearby) {
+            if (!mate.isAlive() || !mate.isBaby() || !mate.hasData(ModAttachments.MOTHER)) {
+                continue;
+            }
+            UUID motherId = ((MotherData)mate.getData(ModAttachments.MOTHER)).motherId();
+            if (joiningIds.contains(motherId)) {
+                babies.add(mate);
+            }
+        }
+        // Prefer adopting an existing pen herd; otherwise create one and elect from the joiners.
+        if (targetPen == null) {
+            ArrayList<Animal> adults = new ArrayList<>(joining);
+            UUID elected = HerdManager.electAlpha(level, joiningIds);
+            if (elected == null) {
+                return;
+            }
+            targetPen = HerdManager.create(elected);
+            newAlphaId = elected;
+        } else {
+            newAlphaId = targetPen.alphaId;
+        }
+        targetPen.penHerd = true;
+        // Detach joiners from their old herds first (re-electing alphas there), then attach all.
+        for (Animal j : joining) {
+            if (j == trigger) {
+                continue;
+            }
+            if (j.hasData(ModAttachments.HERD_DATA)) {
+                HerdData jd = (HerdData)j.getData(ModAttachments.HERD_DATA);
+                HerdManager.Herd oh = HerdManager.get(jd.herdId());
+                if (oh != null && oh != targetPen) {
+                    HerdManager.removeFromHerd(level, j, oh);
+                }
+            }
+        }
+        HerdManager.removeFromHerd(level, trigger, oldHerd);
+        for (Animal j : joining) {
+            j.setData(ModAttachments.HERD_DATA, new HerdData(targetPen.id, false));
+        }
+        for (Animal b : babies) {
+            b.setData(ModAttachments.HERD_DATA, new HerdData(targetPen.id, false));
+            targetPen.members.add(b.getUUID());
+        }
+        if (!targetPen.members.contains(trigger.getUUID())) {
+            targetPen.members.add(trigger.getUUID());
+        }
+        if (!targetPen.members.contains(newAlphaId)) {
+            targetPen.members.add(newAlphaId);
+        }
+        targetPen.alphaId = newAlphaId;
+        HerdManager.syncAlphaFlags(level, targetPen);
+        // Home anchor: mirror splitOffComponent's nomadic-aware home assignment so pen herds
+        // behave like any locally-founded herd.
+        Entity alphaEntity = level.getEntity(newAlphaId);
+        if (alphaEntity instanceof Animal newAlphaAnimal) {
+            boolean nomadic = HomeSettingsManager.get(newAlphaAnimal.getType())
+                    .map(SpeciesHomeSettings::nomadic)
+                    .orElse(false);
+            HomeData home = nomadic
+                    ? new HomeData(newAlphaAnimal.blockPosition(), true)
+                    : new HomeData(newAlphaAnimal.blockPosition());
+            newAlphaAnimal.setData(ModAttachments.HOME, home);
+            for (UUID id : targetPen.members) {
+                Entity e = level.getEntity(id);
+                if (id.equals(newAlphaId) || !(e instanceof Animal a)) {
+                    continue;
+                }
+                a.setData(ModAttachments.HOME, home);
+            }
+        }
+        Ethological.LOGGER.debug(
+                "Ethological: {} seceded into pen herd {} ({} members, alpha {}) — pen-mates absorbed",
+                new Object[]{trigger.getType(), targetPen.id, targetPen.members.size(), newAlphaId});
     }
 
     @SubscribeEvent
@@ -601,9 +827,9 @@ public final class HerdEvents {
         HashSet<UUID> alerted = new HashSet<UUID>();
         alerted.add(victim.getUUID());
         alerted.add(attacker.getUUID());
-        if (victim.hasData(HerdAttachments.HERD_DATA) && (level = victim.level()) instanceof ServerLevel) {
+        if (victim.hasData(ModAttachments.HERD_DATA) && (level = victim.level()) instanceof ServerLevel) {
             ServerLevel serverLevel = (ServerLevel)level;
-            HerdManager.Herd herd = HerdManager.get(((HerdData)victim.getData(HerdAttachments.HERD_DATA)).herdId());
+            HerdManager.Herd herd = HerdManager.get(((HerdData)victim.getData(ModAttachments.HERD_DATA)).herdId());
             if (herd != null) {
                 herd.startPanic(attacker.getUUID(), now);
                 Ethological.LOGGER.debug("Ethological: herd {} alerted by {} \u2014 panic!",herd.id,attacker.getType());
@@ -624,7 +850,7 @@ public final class HerdEvents {
     }
 
     private static void tryAlertNearbyWolf(ServerLevel level, Animal animal, SpeciesHerdSettings settings, long now) {
-        HerdManager.Herd herd = HerdManager.get(((HerdData)animal.getData(HerdAttachments.HERD_DATA)).herdId());
+        HerdManager.Herd herd = HerdManager.get(((HerdData)animal.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return;
         }
@@ -637,7 +863,7 @@ public final class HerdEvents {
             Animal prey;
             boolean targetingMate = false;
             LivingEntity livingEntity = wolf.getTarget();
-            if (livingEntity instanceof Animal && (prey = (Animal)livingEntity).hasData(HerdAttachments.HERD_DATA) && ((HerdData)prey.getData(HerdAttachments.HERD_DATA)).herdId().equals(herd.id)) {
+            if (livingEntity instanceof Animal && (prey = (Animal)livingEntity).hasData(ModAttachments.HERD_DATA) && ((HerdData)prey.getData(ModAttachments.HERD_DATA)).herdId().equals(herd.id)) {
                 targetingMate = true;
             }
             if (!targetingMate && (double)wolf.distanceTo((Entity)animal) > radius) continue;
@@ -657,8 +883,8 @@ public final class HerdEvents {
         if (SleepSettingsManager.get(target.getType()).isEmpty()) {
             return;
         }
-        target.setData(SleepAttachments.SLEEP_DISTURBANCE,new SleepDisturbance(attacker.getUUID(), now));
-        if (((Boolean)target.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        target.setData(ModAttachments.SLEEP_DISTURBANCE,new SleepDisturbance(attacker.getUUID(), now));
+        if (target.getData(ModAttachments.SLEEPING)) {
             SleepEvents.wake(target);
         }
     }
@@ -668,12 +894,12 @@ public final class HerdEvents {
      * Unloaded mothers are kept until {@link MotherData#followUntilGameTime()} expires.
      */
     private static void tickBabyMother(ServerLevel level, Animal baby, long now) {
-        if (!baby.hasData(HerdAttachments.MOTHER)) {
+        if (!baby.hasData(ModAttachments.MOTHER)) {
             return;
         }
-        MotherData motherData = (MotherData)baby.getData(HerdAttachments.MOTHER);
+        MotherData motherData = (MotherData)baby.getData(ModAttachments.MOTHER);
         if (!motherData.isActive(now)) {
-            baby.removeData(HerdAttachments.MOTHER);
+            baby.removeData(ModAttachments.MOTHER);
             return;
         }
         Entity motherEntity = level.getEntity(motherData.motherId());
@@ -682,19 +908,19 @@ public final class HerdEvents {
             return;
         }
         if (!motherEntity.isAlive()) {
-            baby.removeData(HerdAttachments.MOTHER);
+            baby.removeData(ModAttachments.MOTHER);
             return;
         }
         if (!(motherEntity instanceof Animal mother)) {
             return;
         }
-        if (!mother.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (!mother.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return;
         }
-        SleepDisturbance disturbance = (SleepDisturbance)mother.getData(SleepAttachments.SLEEP_DISTURBANCE);
-        if (!baby.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
-            baby.setData(SleepAttachments.SLEEP_DISTURBANCE, disturbance);
-            if (((Boolean)baby.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        SleepDisturbance disturbance = (SleepDisturbance)mother.getData(ModAttachments.SLEEP_DISTURBANCE);
+        if (!baby.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
+            baby.setData(ModAttachments.SLEEP_DISTURBANCE, disturbance);
+            if (baby.getData(ModAttachments.SLEEPING)) {
                 SleepEvents.wake(baby);
             }
         }

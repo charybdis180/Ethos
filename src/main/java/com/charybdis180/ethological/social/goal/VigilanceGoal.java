@@ -1,20 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.entity.monster.Monster
- *  net.minecraft.world.entity.player.Player
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.social.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
-import com.charybdis180.ethological.sleep.SleepAttachments;
-import com.charybdis180.ethological.social.SocialAttachments;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
@@ -38,7 +25,7 @@ extends Goal {
     }
 
     private boolean isAlert() {
-        if (this.mob.level().getGameTime() < (Long)this.mob.getData(SleepAttachments.SLEEP_VIGILANCE)) {
+        if (this.mob.level().getGameTime() < (Long)this.mob.getData(ModAttachments.SLEEP_VIGILANCE)) {
             return true;
         }
         long t = (this.mob.level().getDayTime() % 24000L + 24000L) % 24000L;
@@ -50,7 +37,7 @@ extends Goal {
         if (now < this.nextRollGameTime) {
             return false;
         }
-        if (((Boolean)this.mob.getData(SleepAttachments.SLEEPING)).booleanValue() || ((Boolean)this.mob.getData(SleepAttachments.RESTING)).booleanValue() || this.mob.hasData(SocialAttachments.PLAY)) {
+        if (this.mob.getData(ModAttachments.SLEEPING) || this.mob.getData(ModAttachments.RESTING) || this.mob.hasData(ModAttachments.PLAY)) {
             return false;
         }
         if (HerdManager.panicPhaseOf(this.mob, now) != HerdManager.PanicPhase.NONE) {
@@ -69,7 +56,7 @@ extends Goal {
     }
 
     public boolean canContinueToUse() {
-        return this.scanTicksLeft > 0 && (Boolean)this.mob.getData(SleepAttachments.SLEEPING) == false && (Boolean)this.mob.getData(SleepAttachments.RESTING) == false && !this.mob.hasData(SocialAttachments.PLAY) && HerdManager.panicPhaseOf(this.mob, this.mob.level().getGameTime()) == HerdManager.PanicPhase.NONE;
+        return this.scanTicksLeft > 0 && (Boolean)this.mob.getData(ModAttachments.SLEEPING) == false && (Boolean)this.mob.getData(ModAttachments.RESTING) == false && !this.mob.hasData(ModAttachments.PLAY) && HerdManager.panicPhaseOf(this.mob, this.mob.level().getGameTime()) == HerdManager.PanicPhase.NONE;
     }
 
     public void tick() {

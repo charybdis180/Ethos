@@ -1,23 +1,8 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.blaze3d.vertex.PoseStack
- *  com.mojang.blaze3d.vertex.VertexConsumer
- *  net.minecraft.client.model.EntityModel
- *  net.minecraft.client.model.geom.ModelPart
- *  net.minecraft.client.model.geom.PartPose
- *  net.minecraft.client.model.geom.builders.CubeDeformation
- *  net.minecraft.client.model.geom.builders.CubeListBuilder
- *  net.minecraft.client.model.geom.builders.LayerDefinition
- *  net.minecraft.client.model.geom.builders.MeshDefinition
- *  net.minecraft.client.model.geom.builders.PartDefinition
- *  net.minecraft.util.Mth
- *  net.minecraft.world.entity.animal.Chicken
- */
 package com.charybdis180.ethological.client.sleep;
 
-import com.charybdis180.ethological.sleep.SleepAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
+import com.charybdis180.ethological.client.sleep.SleepPose;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.model.EntityModel;
@@ -71,7 +56,7 @@ extends EntityModel<Chicken> {
     }
 
     public void setupAnim(Chicken entity, float limbSwing, float limbSwingAmount, float ageInTicks, float netHeadYaw, float headPitch) {
-        if (((Boolean)entity.getData(SleepAttachments.SLEEPING)).booleanValue() || ((Boolean)entity.getData(SleepAttachments.RESTING)).booleanValue()) {
+        if ((SleepPose.lieDownModelsEnabled() && (entity.getData(ModAttachments.SLEEPING) || entity.getData(ModAttachments.RESTING)))) {
             this.body.y = 22.25f;
             this.body.xRot = 0.0f;
             this.leftLeg.y = 23.0f;

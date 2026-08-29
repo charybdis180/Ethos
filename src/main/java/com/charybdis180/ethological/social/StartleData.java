@@ -1,9 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- */
 package com.charybdis180.ethological.social;
 
 import net.minecraft.core.BlockPos;

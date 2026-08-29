@@ -1,0 +1,9 @@
+{
+    "pack": {
+        "description": "Ethological <> Fresh Animations behavior-sync. Pairs with Ethological's EMFAnimationApi hook: FA's grazing only plays when an animal is really eating/drinking, and sleeping animals use Ethological's lying pose. Requires EMF + ETF + Fresh Animations.",
+        "pack_format": 34,
+        "supported_formats": {"min_inclusive": 34, "max_inclusive": 34},
+        "min_format": 34,
+        "max_format": 34
+    }
+}

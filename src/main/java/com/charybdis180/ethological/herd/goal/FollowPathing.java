@@ -1,5 +1,6 @@
 package com.charybdis180.ethological.herd.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.Avoidance;
 import com.charybdis180.ethological.avoidance.CliffAvoidance;
 import com.charybdis180.ethological.avoidance.CrowdGrid;
@@ -17,6 +18,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.pathfinder.Path;
 import org.jetbrains.annotations.Nullable;
 
@@ -180,6 +182,20 @@ public final class FollowPathing {
                 .put(col, mob.level().getGameTime() + ESCAPE_BLACKLIST_TTL);
     }
 
+    /**
+     * Clears every per-mob memo this class holds for {@code mob} — hop memo, separation memo,
+     * escape blacklists, and the escape-scan failure memo. Called by the follow watchdog when
+     * a member has made no progress, so its next repath is genuinely fresh: without this, the
+     * escalation would just replay the memoized failures and re-pick the same dead ends.
+     */
+    public static void resetFor(PathfinderMob mob) {
+        UUID id = mob.getUUID();
+        HOP_MEMO.remove(id);
+        SEPARATED_MEMO.remove(id);
+        ESCAPE_BLACKLIST.remove(id);
+        ESCAPE_FAILURE_MEMO.remove(id);
+    }
+
     /** True when the mob's escape scan should skip this stand column this tick. */
     public static boolean isEscapeStandBlacklisted(PathfinderMob mob, BlockPos stand) {
         Map<Long, Long> byMob = ESCAPE_BLACKLIST.get(mob.getUUID());
@@ -319,6 +335,13 @@ public final class FollowPathing {
             lastRejectReason = "stand-null";
             return null;
         }
+        // A grounded mob must commit to a DRY destination stand: a water-surface stand only
+        // makes it wade/swim in on the spot (the alpha near a pond case). Swimming mobs keep
+        // water stands so they can beach via the escape chain.
+        if (!mob.isInWater() && !mob.isSwimming() && !Homes.isDryLand(mob.level(), stand)) {
+            lastRejectReason = "stand-wet";
+            return null;
+        }
         // Cliff lips are not valid follow/reach destinations, but pit-escape (wide) keeps
         // rim stands — climbing out is more important than standing a block off the edge.
         if (!wide && !CliffAvoidance.isEdgeSafe(mob.level(), stand)) {
@@ -371,6 +394,13 @@ public final class FollowPathing {
                 }
                 BlockPos stand = new BlockPos((int)memo[4], (int)memo[5], (int)memo[6]);
                 if (hopPathsThisTick < MAX_HOP_PATHS_PER_TICK) {
+                    // Re-validate the memoized stand for a grounded mob (the memo is dry-gated
+                    // at write time, but a swimmer's memo could otherwise leak to a grounded
+                    // repath of the same column).
+                    if (!mob.isInWater() && !mob.isSwimming() && !Homes.isDryLand(mob.level(), stand)) {
+                        HOP_MEMO.remove(mob.getUUID());
+                        return null;
+                    }
                     hopPathsThisTick++;
                     Path path = mob.getNavigation().createPath(stand.getX() + 0.5D, stand.getY(), stand.getZ() + 0.5D, 1);
                     if (isValidFollowPath(mob.level(), path, mob.blockPosition(), stand, maxStepY,
@@ -406,6 +436,12 @@ public final class FollowPathing {
                 if (stand == null) {
                     continue;
                 }
+                // A grounded mob hops toward a DRY stand only — water-surface columns pull it
+                // off the edge into the pond. Swimmers keep water stands so they can beach.
+                boolean dryStand = Homes.isDryLand(mob.level(), stand);
+                if (!mob.isInWater() && !mob.isSwimming() && !dryStand) {
+                    continue;
+                }
                 if (!CliffAvoidance.isEdgeSafe(mob.level(), stand)) {
                     continue;
                 }
@@ -428,7 +464,10 @@ public final class FollowPathing {
                     return path;
                 }
                 double crowded = CrowdGrid.countCrowdedNodes(mob.level(), path, mob.blockPosition(), 2, 3);
-                double score = endDistSqr + Math.abs(offset) * BEARING_DRIFT_PENALTY + CROWD_PENALTY * crowded;
+                // Dry hops always beat wet hops — a water stand is only accepted when no dry
+                // hop at all can advance the member (e.g. rejoin the alpha across a river).
+                double score = endDistSqr + Math.abs(offset) * BEARING_DRIFT_PENALTY + CROWD_PENALTY * crowded
+                        + (dryStand ? 0.0D : 1_000_000.0D);
                 if (score < bestScore) {
                     bestScore = score;
                     best = path;
@@ -442,6 +481,29 @@ public final class FollowPathing {
                 : new long[] {now, mobX, mobZ, targetCol, 0, 0, 0, 0L});
         trimHopMemo();
         return best;
+    }
+
+    /** Distance (squared) within which a trek commitment still demands a full-route
+     *  canReach proof. Beyond it the A* node budget makes full-route proofs unreliable
+     *  (they fail even across open plains), so callers fall back to first-leg validation. */
+    public static final double FULL_ROUTE_PROOF_RANGE_SQR = 64.0 * 64.0;
+
+    /**
+     * Commitment gate for LONG treks (e.g. the emergency far-water march). A full-route
+     * pathfind to a target beyond ~64 blocks routinely exhausts the node budget and reports
+     * no-canReach even across open ground, so demanding {@link Homes#isStrictlyReachable}
+     * for a 96-192 block candidate rejects nearly every real destination and strands the
+     * searcher standing still. This tiers the proof: near stands keep the strict full-route
+     * check; far stands only prove the FIRST LEG is routable (one validated hop toward the
+     * target, hazard- and edge-checked). The caller then walks the trek leg-by-leg and
+     * re-resolves as terrain loads. False means nothing toward the target is reachable now.
+     */
+    public static boolean firstLegRoutable(PathfinderMob mob, BlockPos stand, double distSqr) {
+        if (distSqr <= FULL_ROUTE_PROOF_RANGE_SQR) {
+            return Homes.isStrictlyReachable(mob, stand);
+        }
+        Path leg = hopToward(mob, stand, MAX_STEP_Y);
+        return leg != null;
     }
 
     private static void trimHopMemo() {
@@ -484,6 +546,11 @@ public final class FollowPathing {
                 if (stand == null) {
                     continue;
                 }
+                // Grounded mobs nudge onto DRY stands only (same reason as hopToward).
+                boolean dryStand = Homes.isDryLand(mob.level(), stand);
+                if (!mob.isInWater() && !mob.isSwimming() && !dryStand) {
+                    continue;
+                }
                 if (!CliffAvoidance.isEdgeSafe(mob.level(), stand)) {
                     continue;
                 }
@@ -495,7 +562,8 @@ public final class FollowPathing {
                 double endDx = (stand.getX() + 0.5) - (target.getX() + 0.5);
                 double endDz = (stand.getZ() + 0.5) - (target.getZ() + 0.5);
                 double endDistSqr = endDx * endDx + endDz * endDz
-                        + CROWD_PENALTY * CrowdGrid.countCrowdedNodes(mob.level(), path, mob.blockPosition(), 2, 3);
+                        + CROWD_PENALTY * CrowdGrid.countCrowdedNodes(mob.level(), path, mob.blockPosition(), 2, 3)
+                        + (dryStand ? 0.0D : 1_000_000.0D);
                 if (endDistSqr < bestEndSqr) {
                     bestEndSqr = endDistSqr;
                     best = path;
@@ -591,11 +659,11 @@ public final class FollowPathing {
     /** Surface stand at the herd alpha's current column, if the mob has a herd. */
     private static BlockPos herdSurface(PathfinderMob mob) {
         if (!(mob instanceof Animal animal)
-                || !animal.hasData(com.charybdis180.ethological.herd.HerdAttachments.HERD_DATA)) {
+                || !animal.hasData(com.charybdis180.ethological.registry.ModAttachments.HERD_DATA)) {
             return null;
         }
         com.charybdis180.ethological.herd.HerdManager.Herd herd = com.charybdis180.ethological.herd.HerdManager.get(
-                animal.getData(com.charybdis180.ethological.herd.HerdAttachments.HERD_DATA).herdId());
+                animal.getData(com.charybdis180.ethological.registry.ModAttachments.HERD_DATA).herdId());
         if (herd == null || herd.alphaId == null || !(mob.level() instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
             return null;
         }
@@ -610,11 +678,11 @@ public final class FollowPathing {
     @Nullable
     private static Animal alphaOf(PathfinderMob mob) {
         if (!(mob instanceof Animal animal)
-                || !animal.hasData(com.charybdis180.ethological.herd.HerdAttachments.HERD_DATA)) {
+                || !animal.hasData(com.charybdis180.ethological.registry.ModAttachments.HERD_DATA)) {
             return null;
         }
         HerdManager.Herd herd = HerdManager.get(
-                animal.getData(com.charybdis180.ethological.herd.HerdAttachments.HERD_DATA).herdId());
+                animal.getData(com.charybdis180.ethological.registry.ModAttachments.HERD_DATA).herdId());
         if (herd == null || herd.alphaId == null || !(mob.level() instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
             return null;
         }
@@ -633,6 +701,28 @@ public final class FollowPathing {
             return 0.0;
         }
         return settings.get().followDistance() * settings.get().sleepFollowMultiplier();
+    }
+
+    /** Alpha-down relaxation factor shared by follow-release and sleep-entry: while the alpha
+     *  sleeps/rests, both circles widen by this multiple so a member released from following
+     *  at 2x follow distance is also ALLOWED to fall asleep there. Without sharing the factor,
+     *  the wider release circle strands members in a dead zone — close enough that
+     *  FollowAlphaGoal says "arrived" (stands still, shows follow_alpha/vigilant), but outside
+     *  the sleep gate, which refuses to let them settle. Must stay >= FollowAlphaGoal's
+     *  alpha-down settle multiplier so the two circles never disagree. */
+    public static final double ALPHA_DOWN_RELAXATION = 2.0;
+
+    /** Sleep-entry radius widened while the alpha is down (asleep or resting). Un-herded or
+     *  alpha-less animals have no one to relax against, so they keep the strict radius. */
+    public static double herdRestRadius(PathfinderMob mob) {
+        Animal alpha = alphaOf(mob);
+        double strict = sleepRadius(mob);
+        if (alpha == null || strict <= 0.0) {
+            return strict;
+        }
+        boolean alphaDown = alpha.getData(com.charybdis180.ethological.registry.ModAttachments.SLEEPING)
+                || alpha.getData(com.charybdis180.ethological.registry.ModAttachments.RESTING);
+        return alphaDown ? strict * ALPHA_DOWN_RELAXATION : strict;
     }
 
     /** 3D distance from the mob to its herd alpha, or -1 when no herd/alpha resolves. */
@@ -663,7 +753,12 @@ public final class FollowPathing {
             HerdManager.Herd herd = HerdManager.herdOf(animal);
             if (herd != null) {
                 BlockPos shared = herd.escapeShare(now);
-                if (shared != null && !isEscapeStandBlacklisted(mob, shared)) {
+                // A swimming mob cannot climb out of the water onto a stand above its own
+                // water level — reject the shared stand for the same reason the scan below
+                // does, so a swimmer never commits to an impossible jump.
+                boolean sharedImpossible = shared != null && mob.isInWater()
+                        && Homes.waterLevelY(mob.level(), mob.blockPosition()) < shared.getY();
+                if (shared != null && !sharedImpossible && !isEscapeStandBlacklisted(mob, shared)) {
                     // Don't let the whole separated herd converge on one far-away stand —
                     // only adopt a mate's proven route when it is actually nearby.
                     double sharedDist = mob.distanceToSqr(shared.getX() + 0.5, shared.getY(), shared.getZ() + 0.5);
@@ -750,6 +845,23 @@ public final class FollowPathing {
                 boolean dry = Homes.isDryLand(mob.level(), stand);
                 int gapNow = Math.abs(herdY - mobY);
                 int gapThere = Math.abs(herdY - stand.getY());
+                // A swimming mob rides the water surface and cannot climb out of the water:
+                // any candidate stand whose surface sits ABOVE its own water level is an
+                // impossible jump (e.g. a shore water column whose heightmap stand is one
+                // block above the mob — the "swimming in place forever" trap). Only stands at
+                // or below the mob's own water level count for a swimmer.
+                if (mob.isInWater() && Homes.waterLevelY(mob.level(), mob.blockPosition()) < stand.getY()) {
+                    rejectGap++;
+                    continue;
+                }
+                // Jump-lip guard: a grounded mob cannot climb onto a stand more than
+                // MAX_STEP_Y above its own feet. The pathfinder can report such a stand
+                // "reachable" on a 1-block node the mob's actual jump never reliably clears,
+                // which is the endless-jump-loop trap — so reject the stand up front.
+                if (!mob.isInWater() && stand.getY() - mobY > MAX_STEP_Y) {
+                    rejectGap++;
+                    continue;
+                }
                 // Never choose a stand that makes the vertical separation from the herd worse.
                 // This alone allows both climbing out of a pit (stand above the mob) and
                 // descending off a ledge (stand below the mob) while preventing the mob from
@@ -829,6 +941,71 @@ public final class FollowPathing {
                         && endDistSqr < mobAlphaSqr) {
                     break outerLoop;
                 }
+            }
+        }
+        // Beach pass: a member floating in open water has NO working fallback above — the
+        // strict scan penalizes/rejects water stands it cannot climb out of, and both the
+        // relaxed deep pass and the floor walk explicitly skip swimming mobs, so a swimmer
+        // that finds no valid stand records a failure memo and freezes mid-lake ("escaping"
+        // while drifting). Reuse the SeekShoreGoal ring strategy here: expand outward over
+        // heightmap dry stands and commit to the reachable one closest to the alpha's
+        // station. The dip guard stays off because swimming below herd level IS the
+        // situation; climbing out at the shore closes the gap afterwards.
+        if (mob.isInWater() && (best == null || bestStand == null || !Homes.isDryLand(mob.level(), bestStand))) {
+            Level beachLevel = mob.level();
+            BlockPos beachOrigin = mob.blockPosition();
+            double beachBestScore = Double.MAX_VALUE;
+            Path beachBest = null;
+            BlockPos beachStand = null;
+            int beachChecks = 0;
+            int beachFails = 0;
+            beachLoop:
+            for (int ring = 3; ring <= 24 && beachChecks <= MAX_ESCAPE_CHECKS / 2; ring += 3) {
+                for (int dx = -ring; dx <= ring; dx += ring) {
+                    for (int dz = -ring; dz <= ring; ++dz) {
+                        Path path;
+                        BlockPos stand = beachLevel.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                                new BlockPos(beachOrigin.getX() + dx, 0, beachOrigin.getZ() + dz)).above();
+                        if (!Homes.isDryLand(beachLevel, stand) || isEscapeStandBlacklisted(mob, stand)) {
+                            continue;
+                        }
+                        if (++beachChecks > MAX_ESCAPE_CHECKS / 2) {
+                            break beachLoop;
+                        }
+                        path = createPathWide(mob, stand);
+                        if (!isValidFollowPath(beachLevel, path, beachOrigin, stand, maxStepY, 1.0D)) {
+                            if ("no-canReach".equals(lastRejectReason)
+                                    && ++beachFails >= MAX_ESCAPE_CONSECUTIVE_FAILS) {
+                                break beachLoop;
+                            }
+                            continue;
+                        }
+                        beachFails = 0;
+                        double bDx = (stand.getX() + 0.5) - (target.getX() + 0.5);
+                        double bDz = (stand.getZ() + 0.5) - (target.getZ() + 0.5);
+                        double score = bDx * bDx + bDz * bDz;
+                        if (score < beachBestScore) {
+                            beachBestScore = score;
+                            beachBest = path;
+                            beachStand = stand;
+                        }
+                    }
+                }
+            }
+            if (beachBest != null) {
+                // The chosen shore stand may hug a wall corner right at the waterline — a
+                // convex corner the swimmer's AABB clips forever once it reaches the edge.
+                // Shift the stand into the open side of the wall and re-validate the route.
+                BlockPos offset = Homes.offsetStandFromCorners(beachLevel, beachStand);
+                if (offset != beachStand && offset != null) {
+                    Path offsetPath = createPathWide(mob, offset);
+                    if (isValidFollowPath(beachLevel, offsetPath, beachOrigin, offset, maxStepY, 1.0D)) {
+                        beachBest = offsetPath;
+                        beachStand = offset;
+                    }
+                }
+                best = beachBest;
+                bestStand = beachStand;
             }
         }
         // The strict scan only accepts stands that close the vertical gap to the herd's

@@ -1,19 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.Vec3i
- *  net.minecraft.world.entity.PathfinderMob
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.pathfinder.Path
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.social.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.social.StartleData;
 import com.charybdis180.ethological.util.FleePathing;
 import java.util.EnumSet;
@@ -35,12 +23,12 @@ extends Goal {
     }
 
     private StartleData activeStartle() {
-        if (!this.mob.hasData(SocialAttachments.STARTLE)) {
+        if (!this.mob.hasData(ModAttachments.STARTLE)) {
             return null;
         }
-        StartleData data = (StartleData)this.mob.getData(SocialAttachments.STARTLE);
+        StartleData data = (StartleData)this.mob.getData(ModAttachments.STARTLE);
         if (this.mob.level().getGameTime() >= data.untilGameTime()) {
-            this.mob.removeData(SocialAttachments.STARTLE);
+            this.mob.removeData(ModAttachments.STARTLE);
             return null;
         }
         if (HerdManager.panicPhaseOf(this.mob, this.mob.level().getGameTime()) != HerdManager.PanicPhase.NONE) {
@@ -73,13 +61,13 @@ extends Goal {
 
     public void stop() {
         this.mob.getNavigation().stop();
-        this.mob.removeData(SocialAttachments.STARTLE);
+        this.mob.removeData(ModAttachments.STARTLE);
     }
 
     private void bolt() {
-        StartleData data = (StartleData)this.mob.getData(SocialAttachments.STARTLE);
-        Vec3 from = Vec3.atCenterOf((Vec3i)data.fromPos());
-        Path path = FleePathing.beelineAway((PathfinderMob)this.mob, from, 10.0, 4);
+        StartleData data = (StartleData)this.mob.getData(ModAttachments.STARTLE);
+        Vec3 from = Vec3.atCenterOf(data.fromPos());
+        Path path = FleePathing.beelineAway(this.mob, from, 10.0, 4);
         if (path != null) {
             this.mob.getNavigation().moveTo(path, 1.5);
         }

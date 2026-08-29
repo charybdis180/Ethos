@@ -1,29 +1,14 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.packs.resources.PreparableReloadListener
- *  net.minecraft.world.effect.MobEffectInstance
- *  net.minecraft.world.effect.MobEffects
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.animal.Animal
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.AddReloadListenerEvent
- *  net.neoforged.neoforge.event.entity.EntityJoinLevelEvent
- *  net.neoforged.neoforge.event.tick.EntityTickEvent$Post
- */
 package com.charybdis180.ethological.thirst;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.config.EthologicalConfig;
 import com.charybdis180.ethological.home.Homes;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.thirst.SpeciesThirstSettings;
 import com.charybdis180.ethological.thirst.Thirst;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
 import com.charybdis180.ethological.thirst.ThirstData;
 import com.charybdis180.ethological.thirst.ThirstSettingsManager;
 import com.charybdis180.ethological.thirst.goal.DrinkWaterGoal;
+import com.charybdis180.ethological.util.BetterDaysCompat;
 import java.util.Optional;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -42,7 +27,7 @@ public final class ThirstEvents {
 
     @SubscribeEvent
     public static void onAddReloadListeners(AddReloadListenerEvent event) {
-        event.addListener((PreparableReloadListener)new ThirstSettingsManager());
+        event.addListener(new ThirstSettingsManager());
     }
 
     @SubscribeEvent
@@ -61,7 +46,7 @@ public final class ThirstEvents {
         }
         SpeciesThirstSettings settings = settingsOpt.get();
         long now = animal.level().getGameTime();
-        if (!animal.hasData(ThirstAttachments.THIRST_DATA)) {
+        if (!animal.hasData(ModAttachments.THIRST_DATA)) {
             Thirst.setData((Entity)animal, new ThirstData(settings.maxThirst(), settings.maxThirst(), now + 1L + (long)animal.getRandom().nextInt(settings.depletionIntervalTicks()), now + (long)settings.dehydrateDamageIntervalTicks(), now));
         } else if (Thirst.getMaxThirst((Entity)animal) != settings.maxThirst()) {
             ThirstData data = Thirst.data((Entity)animal);
@@ -85,13 +70,18 @@ public final class ThirstEvents {
         if (settingsOpt.isEmpty()) {
             return;
         }
-        if (!animal.hasData(ThirstAttachments.THIRST_DATA)) {
+        if (!animal.hasData(ModAttachments.THIRST_DATA)) {
             return;
         }
         SpeciesThirstSettings settings = settingsOpt.get();
         long now = animal.level().getGameTime();
         if (now >= (data = Thirst.data((Entity)animal)).nextDepletionGameTime()) {
-            int interval = Math.max(1, Math.round((float)settings.depletionIntervalTicks() * ThirstEvents.individualPace(animal)));
+            // Global drain-speed option first, then per-animal personality and climate multipliers.
+            float global = EthologicalConfig.CONFIG.comfort.thirstDrainMultiplier.get().floatValue();
+            int interval = Math.max(1, Math.round((float)settings.depletionIntervalTicks() * ThirstEvents.individualPace(animal) * global));
+            if (EthologicalConfig.CONFIG.compat.betterDaysSyncDrain.get()) {
+                interval = Math.max(1, Math.round((float)interval * BetterDaysCompat.drainScale(animal.level())));
+            }
             if (Homes.isHotFor(animal)) {
                 float mult = ((Double)EthologicalConfig.CONFIG.comfort.heatDepletionMultiplier.get()).floatValue();
                 interval = Math.max(1, Math.round((float)interval * mult));
@@ -101,7 +91,7 @@ public final class ThirstEvents {
                 float rainMult = EthologicalConfig.CONFIG.comfort.rainThirstDepletionMultiplier.get().floatValue();
                 interval = Math.max(1, Math.round(interval * rainMult));
             }
-            if (!settings.depleteWhileSleeping() && ((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+            if (!settings.depleteWhileSleeping() && animal.getData(ModAttachments.SLEEPING)) {
                 Thirst.setData((Entity)animal, data.withNextDepletion(now + (long)interval));
             } else {
                 data = data.withThirst(Math.max(0, data.thirst() - 1)).withNextDepletion(now + (long)interval);

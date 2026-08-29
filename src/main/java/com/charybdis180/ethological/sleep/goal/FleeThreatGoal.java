@@ -1,23 +1,8 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.PathfinderMob
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.pathfinder.Path
- */
 package com.charybdis180.ethological.sleep.goal;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.MotherData;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepDisturbance;
 import com.charybdis180.ethological.sleep.SleepEvents;
 import com.charybdis180.ethological.util.FleePathing;
@@ -84,7 +69,7 @@ extends Goal {
     }
 
     private double currentSpeed() {
-        return this.threat.distanceTo((Entity)this.mob) <= 8.0f ? 1.7 : 1.4;
+        return this.threat.distanceTo(this.mob) <= 8.0f ? 1.7 : 1.4;
     }
 
     private LivingEntity findThreat() {
@@ -98,34 +83,34 @@ extends Goal {
         }
         ServerLevel serverLevel = (ServerLevel)level;
         this.inheritMotherDisturbance(serverLevel);
-        if (!this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (!this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return null;
         }
-        SleepDisturbance disturbance = (SleepDisturbance)this.mob.getData(SleepAttachments.SLEEP_DISTURBANCE);
+        SleepDisturbance disturbance = (SleepDisturbance)this.mob.getData(ModAttachments.SLEEP_DISTURBANCE);
         Entity entity = serverLevel.getEntity(disturbance.threatId());
         if (!(entity instanceof LivingEntity) || !(living = (LivingEntity)entity).isAlive()) {
             return null;
         }
-        return living.distanceTo((Entity)this.mob) <= 36.0f ? living : null;
+        return living.distanceTo(this.mob) <= 36.0f ? living : null;
     }
 
     /** Babies copy mother's disturbance so they flee the same threat alongside her. */
     private void inheritMotherDisturbance(ServerLevel serverLevel) {
-        if (!this.mob.isBaby() || !this.mob.hasData(HerdAttachments.MOTHER)) {
+        if (!this.mob.isBaby() || !this.mob.hasData(ModAttachments.MOTHER)) {
             return;
         }
-        MotherData motherData = (MotherData)this.mob.getData(HerdAttachments.MOTHER);
+        MotherData motherData = (MotherData)this.mob.getData(ModAttachments.MOTHER);
         if (this.mob.level().getGameTime() >= motherData.followUntilGameTime()) {
             return;
         }
         Entity motherEntity = serverLevel.getEntity(motherData.motherId());
-        if (!(motherEntity instanceof Animal mother) || !mother.isAlive() || !mother.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (!(motherEntity instanceof Animal mother) || !mother.isAlive() || !mother.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return;
         }
-        SleepDisturbance motherDisturbance = (SleepDisturbance)mother.getData(SleepAttachments.SLEEP_DISTURBANCE);
-        if (!this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
-            this.mob.setData(SleepAttachments.SLEEP_DISTURBANCE, motherDisturbance);
-            if (((Boolean)this.mob.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        SleepDisturbance motherDisturbance = (SleepDisturbance)mother.getData(ModAttachments.SLEEP_DISTURBANCE);
+        if (!this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
+            this.mob.setData(ModAttachments.SLEEP_DISTURBANCE, motherDisturbance);
+            if (this.mob.getData(ModAttachments.SLEEPING)) {
                 SleepEvents.wake(this.mob);
             }
         }
@@ -133,7 +118,7 @@ extends Goal {
 
     private void moveAway() {
         double speed = this.currentSpeed();
-        Path path = FleePathing.beelineAway((PathfinderMob)this.mob, this.threat.position(), 16.0, 8);
+        Path path = FleePathing.beelineAway(this.mob, this.threat.position(), 16.0, 8);
         if (path != null) {
             this.mob.getNavigation().moveTo(path, speed);
             this.lastSpeed = speed;

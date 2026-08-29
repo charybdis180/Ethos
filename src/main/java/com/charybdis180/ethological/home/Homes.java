@@ -1,40 +1,15 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.BlockPos$MutableBlockPos
- *  net.minecraft.core.Direction
- *  net.minecraft.core.Direction$Plane
- *  net.minecraft.core.Vec3i
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.tags.BlockTags
- *  net.minecraft.tags.FluidTags
- *  net.minecraft.util.Mth
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.PathfinderMob
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.LevelReader
- *  net.minecraft.world.level.biome.Biome
- *  net.minecraft.world.level.block.state.BlockState
- *  net.minecraft.world.level.levelgen.Heightmap$Types
- *  net.minecraft.world.level.pathfinder.Path
- *  net.minecraft.world.phys.AABB
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.home;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.Avoidance;
 import com.charybdis180.ethological.config.EthologicalConfig;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
-import com.charybdis180.ethological.home.HomeAttachments;
 import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.home.SpeciesHomeSettings;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -52,6 +27,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.animal.Animal;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.biome.Biome;
@@ -91,6 +67,12 @@ public final class Homes {
     private static final Map<Long, WaterCandidateResult> WATER_CANDIDATE_CACHE = new ConcurrentHashMap<Long, WaterCandidateResult>();
     private static final long WATER_CANDIDATE_TICKS = 300L;
     private static final int WATER_CANDIDATE_CACHE_LIMIT = 8192;
+    /** Shared cache for {@link #findDistantWater}: one sparse far-ring scan per chunk cell serves
+     *  every dehydrating animal standing in it for the TTL. Null surfaces are stored as a literal
+     *  null inside the record (ConcurrentHashMap forbids null values). */
+    private static final Map<Long, DistantWaterResult> DISTANT_WATER_CACHE = new ConcurrentHashMap<Long, DistantWaterResult>();
+    private static final long DISTANT_WATER_TICKS = 600L;
+    private static final int DISTANT_WATER_CACHE_LIMIT = 2048;
     /** Memo for {@link #surfaceStand}: per-level, keyed by 26-bit-packed column, valid for one
      *  game tick. A column's stand is a pure function of the world, and {@link
      *  #invalidateSurfaceStandMemo} clears it on any block change, so the memo cannot go stale.
@@ -120,6 +102,11 @@ public final class Homes {
     /** Water-scan result plus a completeness flag: a scan that skipped unloaded chunks cannot
      *  prove absence of water, so callers must not cache its empty result as a miss. */
     private record WaterScanResult(boolean complete, java.util.List<BlockPos> surfaces) {
+    }
+
+    /** Expiry plus the nearest far-ring surfaces found by {@link #findDistantWater}, ordered
+     *  nearest-first; an empty list means the scan completed and found nothing. */
+    private record DistantWaterResult(long expiryGameTime, List<BlockPos> surfaces) {
     }
 
     /**
@@ -264,7 +251,7 @@ public final class Homes {
     }
 
     public static Optional<BlockPos> homeOf(Entity entity) {
-        return entity.hasData(HomeAttachments.HOME) ? Optional.of(((HomeData)entity.getData(HomeAttachments.HOME)).pos()) : Optional.empty();
+        return entity.hasData(ModAttachments.HOME) ? Optional.of(((HomeData)entity.getData(ModAttachments.HOME)).pos()) : Optional.empty();
     }
 
     public static Optional<BlockPos> effectiveHome(Animal animal) {
@@ -275,23 +262,23 @@ public final class Homes {
         Optional<Animal> alpha = Homes.herdAlpha(animal);
         if (alpha.isPresent() && alpha.get() != animal) {
             Animal a = alpha.get();
-            return a.hasData(HomeAttachments.HOME) ? Optional.of((HomeData)a.getData(HomeAttachments.HOME)) : Optional.empty();
+            return a.hasData(ModAttachments.HOME) ? Optional.of((HomeData)a.getData(ModAttachments.HOME)) : Optional.empty();
         }
-        return animal.hasData(HomeAttachments.HOME) ? Optional.of((HomeData)animal.getData(HomeAttachments.HOME)) : Optional.empty();
+        return animal.hasData(ModAttachments.HOME) ? Optional.of((HomeData)animal.getData(ModAttachments.HOME)) : Optional.empty();
     }
 
     public static boolean isHomeOwner(Animal animal) {
-        if (!animal.hasData(HerdAttachments.HERD_DATA)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA)) {
             return true;
         }
-        return ((HerdData)animal.getData(HerdAttachments.HERD_DATA)).alpha();
+        return ((HerdData)animal.getData(ModAttachments.HERD_DATA)).alpha();
     }
 
     public static Optional<Animal> herdAlpha(Animal animal) {
-        if (!animal.hasData(HerdAttachments.HERD_DATA)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA)) {
             return Optional.empty();
         }
-        HerdData data = (HerdData)animal.getData(HerdAttachments.HERD_DATA);
+        HerdData data = (HerdData)animal.getData(ModAttachments.HERD_DATA);
         if (data.alpha()) {
             return Optional.of(animal);
         }
@@ -321,7 +308,7 @@ public final class Homes {
                 Entity entity = serverLevel.getEntity(cached.alphaId());
                 if (entity instanceof Animal) {
                     Animal alpha = (Animal)entity;
-                    if (alpha.hasData(HerdAttachments.HERD_DATA) && ((HerdData)alpha.getData(HerdAttachments.HERD_DATA)).herdId().equals(herdId)) {
+                    if (alpha.hasData(ModAttachments.HERD_DATA) && ((HerdData)alpha.getData(ModAttachments.HERD_DATA)).herdId().equals(herdId)) {
                         return Optional.of(alpha);
                     }
                 }
@@ -332,7 +319,7 @@ public final class Homes {
         Animal found = null;
         for (Animal other : self.level().getEntitiesOfClass(Animal.class, box)) {
             HerdData otherData;
-            if (other == self || !other.hasData(HerdAttachments.HERD_DATA) || !(otherData = (HerdData)other.getData(HerdAttachments.HERD_DATA)).alpha() || !otherData.herdId().equals(herdId)) continue;
+            if (other == self || !other.hasData(ModAttachments.HERD_DATA) || !(otherData = (HerdData)other.getData(ModAttachments.HERD_DATA)).alpha() || !otherData.herdId().equals(herdId)) continue;
             found = other;
             break;
         }
@@ -345,10 +332,10 @@ public final class Homes {
 
     public static Optional<Double> effectiveMigrationHeading(Animal animal) {
         Animal source = Homes.herdAlpha(animal).orElse(animal);
-        if (!source.hasData(HomeAttachments.NOMAD_HEADING)) {
+        if (!source.hasData(ModAttachments.NOMAD_HEADING)) {
             return Optional.empty();
         }
-        double heading = (Double)source.getData(HomeAttachments.NOMAD_HEADING);
+        double heading = (Double)source.getData(ModAttachments.NOMAD_HEADING);
         return Double.isNaN(heading) ? Optional.empty() : Optional.of(heading);
     }
 
@@ -394,7 +381,7 @@ public final class Homes {
         if (home.isEmpty()) {
             return false;
         }
-        if (animal.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)home.get()))) <= 36.0) {
+        if (animal.distanceToSqr(Vec3.atCenterOf(((Vec3i)home.get()))) <= 36.0) {
             return false;
         }
         if (!sleepSettings.isSleepTime(dayTime)) {
@@ -558,6 +545,82 @@ public final class Homes {
         return result;
     }
 
+    /** Nearest ring the emergency far-water scan starts at (just past the dense spiral's reach). */
+    private static final int MIN_DISTANT_RING = 32;
+    /** Outer bound of the emergency far-water scan. */
+    public static final int MAX_DISTANT_WATER_SCAN_RADIUS = 192;
+    /** Ring spacing for the emergency far-water scan. */
+    private static final int DISTANT_RING_STEP = 16;
+    /** Score penalty per already-claimed shore stand within one block of a drink candidate.
+     *  Large enough that any unclaimed stand beats a crowded one at pond scale, so N drinkers
+     *  spread around the shoreline instead of committing to the identical bank tile. */
+    private static final double SHORE_SLOT_PENALTY = 40.0;
+
+    /**
+     * Emergency far-water scan for dehydrating animals. Unlike {@link #findWaterCandidates},
+     * this probes each sampled column's heightmap (one O(1) read per column) instead of a dense
+     * Y-band spiral, so it covers the full 32-192 range cheaply and sees water at any elevation.
+     * Fully non-blocking on unloaded chunks; returns up to {@code limit} surfaces nearest-first;
+     * shared per-chunk via {@link #DISTANT_WATER_CACHE} so a desperate herd runs one scan, not N.
+     */
+    public static List<BlockPos> findDistantWater(Level level, BlockPos center, int limit) {
+        long key = Homes.waterMissKey(level, center, -1);
+        long now = level.getGameTime();
+        DistantWaterResult cached = DISTANT_WATER_CACHE.get(key);
+        if (cached != null) {
+            if (now < cached.expiryGameTime()) {
+                return cached.surfaces();
+            }
+            DISTANT_WATER_CACHE.remove(key);
+        }
+        boolean complete = true;
+        ArrayList<ShelterCandidate> found = new ArrayList<>();
+        BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
+        for (int ring = MIN_DISTANT_RING; ring <= MAX_DISTANT_WATER_SCAN_RADIUS; ring += DISTANT_RING_STEP) {
+            // Perimeter walk with strides; ~1-2k heightmap reads per ring at r=192.
+            int sideLen = 2 * ring;
+            int stride = Math.max(1, ring / 24);
+            for (int i = 0; i < sideLen; i += stride) {
+                int[][] corners = {{-ring + i, -ring}, {-ring + i, -ring + sideLen}, {-ring, -ring + i}, {-ring + sideLen, -ring + i}};
+                for (int[] c : corners) {
+                    int x = center.getX() + c[0];
+                    int z = center.getZ() + c[1];
+                    if (!Homes.chunkFullyLoaded(level, x, z)) {
+                        complete = false;
+                        continue;
+                    }
+                    BlockPos stand = Homes.surfaceStand(level, x, z);
+                    if (stand == null || !Homes.isWaterColumn(level, stand)) {
+                        continue;
+                    }
+                    double dist = probe.set(x, stand.getY(), z).distSqr(center);
+                    found.add(new ShelterCandidate(new BlockPos(x, Homes.waterLevelY(level, stand), z), 0, dist));
+                }
+            }
+        }
+        found.sort(Comparator.comparingDouble(ShelterCandidate::distSqr));
+        ArrayList<BlockPos> result = new ArrayList<>();
+        for (ShelterCandidate c : found) {
+            if (result.size() >= limit) {
+                break;
+            }
+            result.add(c.pos());
+        }
+        if (result.isEmpty() && !complete) {
+            // Chunks still streaming in: short TTL so fresh terrain is re-checked soon.
+            if (DISTANT_WATER_CACHE.size() > DISTANT_WATER_CACHE_LIMIT) {
+                DISTANT_WATER_CACHE.clear();
+            }
+            DISTANT_WATER_CACHE.put(key, new DistantWaterResult(now + WATER_INCOMPLETE_MISS_TICKS, List.of()));
+            return List.of();
+        }
+        if (DISTANT_WATER_CACHE.size() > DISTANT_WATER_CACHE_LIMIT) {
+            DISTANT_WATER_CACHE.clear();
+        }
+        DISTANT_WATER_CACHE.put(key, new DistantWaterResult(now + DISTANT_WATER_TICKS, List.copyOf(result)));
+        return result;
+    }
+
     /**
      * True for ponds/rivers/lakes at the outdoor world surface — not cave aquifers or fully roofed indoor pools.
      */
@@ -601,8 +664,24 @@ public final class Homes {
                 if (!Homes.isDryLand(level, candidate) && !Homes.isDryLand(level, candidate.above())) continue;
                 BlockPos blockPos = stand = Homes.isDryLand(level, candidate) ? candidate : candidate.above();
                 if (Homes.isWater(level, stand) || excluded.contains(stand)) continue;
+                // Spread drinkers around the pond: each already-claimed stand within one block
+                // of a candidate demotes it, so the Nth cow rings the shore instead of stacking
+                // on the same bank tile. The penalty dwarfs any realistic distSqr at pond scale.
+                int claimedNeighbors = 0;
+                for (BlockPos claimed : excluded) {
+                    if (Math.abs(stand.getX() - claimed.getX()) <= 1
+                            && Math.abs(stand.getZ() - claimed.getZ()) <= 1
+                            && Math.abs(stand.getY() - claimed.getY()) <= 2) {
+                        ++claimedNeighbors;
+                    }
+                }
+                // Cliff-gated like every other destination stand: never commit a drinker to a
+                // bank tile at a drop. Only possible when a full Level is available (all live
+                // callers pass one); the memoized clearance path needs Level's game time.
+                if (level instanceof Level realLevel && !Homes.isCliffSafe(realLevel, stand)) continue;
                 int dyFrom = Math.abs(stand.getY() - from.getY());
-                double score = stand.distSqr((Vec3i)from) + (double)(dyFrom * dyFrom) * 16.0;
+                double score = stand.distSqr(from) + (double)(dyFrom * dyFrom) * 16.0
+                        + (double)claimedNeighbors * SHORE_SLOT_PENALTY;
                 if (!(score < bestScore)) continue;
                 bestScore = score;
                 best = stand;
@@ -645,6 +724,30 @@ public final class Homes {
         }
         BlockState below = level.getBlockState(ground);
         return !below.isAir() && below.getFluidState().isEmpty();
+    }
+
+    /**
+     * True when {@code stand} is a fully dry bed: the feet cell is dry land, there is no water in
+     * the stand column above the feet, and none of the four orthogonal neighbors has water at the
+     * feet or body level. A plain {@link #isDryLand} pass accepts shoreline cells whose mob AABB
+     * hangs into the neighboring water, leaving a sleeping/resting mob with its body in the water.
+     * Sleep and rest beds require this stricter footing.
+     */
+    public static boolean isDryBed(Level level, BlockPos stand) {
+        if (!Homes.isDryLand(level, stand)) {
+            return false;
+        }
+        if (Homes.isWater(level, stand.above())) {
+            return false;
+        }
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            cursor.set(stand.getX() + dir.getStepX(), stand.getY(), stand.getZ() + dir.getStepZ());
+            if (Homes.isWater(level, cursor) || Homes.isWater(level, cursor.above())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -706,6 +809,115 @@ public final class Homes {
         return score;
     }
 
+    /** Standing surface Y at a column: the dry-land stand Y if present, otherwise the water
+     *  surface Y for water columns, otherwise {@link Integer#MIN_VALUE} when unloaded. */
+    private static int columnSurfaceY(Level level, int x, int z) {
+        BlockPos stand = Homes.surfaceStand(level, x, z);
+        return stand != null ? stand.getY() : Integer.MIN_VALUE;
+    }
+
+    /**
+     * Largest downward drop (in blocks) from the surface at {@code stand} across the
+     * {@code radius}-block neighborhood. Only neighbour DROPS count — a slope falling away
+     * beneath the stand is not scored as sheer, so a mudslide reads as flat, while a cliff
+     * edge reads as sheer. {@link Integer#MAX_VALUE} when the stand's own column or any
+     * neighbour column is unloaded (callers treat that as "not flat").
+     */
+    public static int flatnessDropStats(Level level, BlockPos stand, int radius,
+                                        int[] flat, int[] cliff) {
+        int baseY = Homes.columnSurfaceY(level, stand.getX(), stand.getZ());
+        if (baseY == Integer.MIN_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        int maxDrop = 0;
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dz = -radius; dz <= radius; ++dz) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                int neighborY = Homes.columnSurfaceY(level, stand.getX() + dx, stand.getZ() + dz);
+                if (neighborY == Integer.MIN_VALUE) {
+                    maxDrop = Integer.MAX_VALUE;
+                    continue;
+                }
+                int drop = baseY - neighborY;
+                if (drop > maxDrop) {
+                    maxDrop = drop;
+                }
+            }
+        }
+        return maxDrop;
+    }
+
+    /**
+     * Flatness preference for a sleep/huddle stand: the largest Y-difference ANY herd-mate
+     * would see between two spots in a block-high herd body. A whole-terrain column is NOT
+     * treated as a sheer cliff up front — the basin slope is fine for a lone sleeper, but a
+     * busy cliff edge (an actual drop) makes the huddle body break apart.
+     *
+     * <p>Unloaded columns contribute a penalty only once there is ANY real drop, so a fully
+     * open region never penalizes edge-candidates created by the heightmap pass-up.</p>
+     *
+     * @return a "flatness" scalar; LOWER is better. 0 = perfectly flat.
+     */
+    public static double standFlatness(Level level, BlockPos stand, int radius) {
+        int maxDrop = Homes.flatnessDropStats(level, stand, radius, null, null);
+        if (Math.abs(maxDrop) <= CLIFF_MAX_DROP) {
+            return 0.0;
+        }
+        return (double)Math.min(Math.abs(maxDrop), 16);
+    }
+
+    /**
+     * Flat, stable, unoccupied stand near {@code center} for an alpha's bed. Prefers the
+     * flattest stand (validated by the pathfinder itself), centered on the anchor, with a
+     * large gap for the growing huddle. Returns empty when nothing qualifies, so callers
+     * keep their normal fallback chain untouched.
+     */
+    public static Optional<BlockPos> flatStandNear(Level level, PathfinderMob mob, BlockPos center, int radius,
+                                                   Set<BlockPos> occupied, int spacing, int footprint) {
+        java.util.ArrayList<ShelterCandidate> candidates = new java.util.ArrayList<ShelterCandidate>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int ring = 0; ring <= radius; ++ring) {
+            for (int dy = -1; dy <= 2; ++dy) {
+                for (int dx = -ring; dx <= ring; ++dx) {
+                    int stepZ = Math.abs(dx) == ring ? 1 : Math.max(1, 2 * ring);
+                    for (int dz = -ring; dz <= ring; dz += stepZ) {
+                        pos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                        if (!Homes.isDryLand(level, pos)) {
+                            continue;
+                        }
+                        if (!mob.getNavigation().isStableDestination(pos)) {
+                            continue;
+                        }
+                        boolean blocked = false;
+                        for (BlockPos occ : occupied) {
+                            if (Math.abs(pos.getX() - occ.getX()) <= spacing
+                                    && Math.abs(pos.getZ() - occ.getZ()) <= spacing) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                        if (blocked) {
+                            continue;
+                        }
+                        double flatness = Homes.standFlatness(level, pos, footprint);
+                        if (flatness > 2.0) {
+                            continue;
+                        }
+                        double score = flatness * 8.0 + pos.distSqr(center);
+                        candidates.add(new ShelterCandidate(pos.immutable(), 0, score));
+                    }
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            return Optional.empty();
+        }
+        candidates.sort((a, b) -> Double.compare(a.distSqr(), b.distSqr()));
+        return Optional.of(candidates.get(0).pos());
+    }
+
     public static boolean isSheltered(Level level, BlockPos stand) {
         return Homes.shelterScore(level, stand) > 0;
     }
@@ -733,7 +945,7 @@ public final class Homes {
                         if (!Homes.isCliffSafe(level, pos)) {
                             continue;
                         }
-                        candidates.add(new ShelterCandidate(pos.immutable(), score, pos.distSqr((Vec3i)current)));
+                        candidates.add(new ShelterCandidate(pos.immutable(), score, pos.distSqr(current)));
                     }
                 }
             }
@@ -816,6 +1028,48 @@ public final class Homes {
      * (shelter score first, then distance). {@code spacing} 0 excludes only the exact occupied
      * columns, so no two animals share a block while adjacent spots stay allowed.
      */
+    /**
+     * Nearest dry, cliff-safe stand to {@code (x,z)} that lies INSIDE {@code region} and is at
+     * least {@code spacing} from every column in {@code occupied}. Probes a small spiral
+     * around the desired column; null when nothing valid is found (caller keeps its fallback).
+     */
+    @Nullable
+    public static BlockPos findStandInRegion(Level level, double x, double z, LongSet region,
+                                             Set<BlockPos> occupied, int spacing) {
+        int cx = Mth.floor(x);
+        int cz = Mth.floor(z);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int ring = 0; ring <= 4; ++ring) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                for (int dz = -ring; dz <= ring; ++dz) {
+                    if (ring > 0 && Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
+                        continue;
+                    }
+                    cursor.set(cx + dx, 0, cz + dz);
+                    if (!region.contains(FenceDetection.pack(cursor.getX(), cursor.getZ()))) {
+                        continue;
+                    }
+                    BlockPos stand = Homes.surfaceStand(level, cursor.getX(), cursor.getZ());
+                    if (stand == null || !Homes.isDryLand(level, stand) || !Homes.isCliffSafe(level, stand)) {
+                        continue;
+                    }
+                    boolean blocked = false;
+                    for (BlockPos occ : occupied) {
+                        if (Math.abs(stand.getX() - occ.getX()) <= spacing
+                                && Math.abs(stand.getZ() - occ.getZ()) <= spacing) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                    if (!blocked) {
+                        return stand.immutable();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     public static Optional<BlockPos> findUnoccupiedStand(Level level, BlockPos center, int radius,
                                                          Set<BlockPos> occupied, int spacing) {
         java.util.ArrayList<ShelterCandidate> candidates = new java.util.ArrayList<ShelterCandidate>();
@@ -826,7 +1080,7 @@ public final class Homes {
                     int stepZ = Math.abs(dx) == ring ? 1 : Math.max(1, 2 * ring);
                     for (int dz = -ring; dz <= ring; dz += stepZ) {
                         pos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
-                        if (!Homes.isDryLand(level, pos) || !Homes.isCliffSafe(level, pos)) {
+                        if (!Homes.isDryBed(level, pos) || !Homes.isCliffSafe(level, pos)) {
                             continue;
                         }
                         boolean blocked = false;
@@ -840,7 +1094,7 @@ public final class Homes {
                         if (blocked) {
                             continue;
                         }
-                        candidates.add(new ShelterCandidate(pos.immutable(), Homes.shelterScore(level, pos), pos.distSqr((Vec3i)center)));
+                        candidates.add(new ShelterCandidate(pos.immutable(), Homes.shelterScore(level, pos), pos.distSqr(center)));
                     }
                 }
             }
@@ -887,15 +1141,6 @@ public final class Homes {
         return Optional.empty();
     }
 
-    /**
-     * Standing surface Y at a column: the dry-land stand Y if present, otherwise the water
-     * surface Y for water columns, otherwise {@link Integer#MIN_VALUE} (unloaded or impassable).
-     */
-    private static int columnSurfaceY(Level level, int x, int z) {
-        BlockPos stand = Homes.surfaceStand(level, x, z);
-        return stand != null ? stand.getY() : Integer.MIN_VALUE;
-    }
-
     public static boolean isOpenWater(Level level, BlockPos pos, int radius) {
         if (!Homes.isWater(level, pos) && !Homes.isWater(level, pos.below())) {
             return false;
@@ -927,7 +1172,7 @@ public final class Homes {
         }
         Path path = mob.getNavigation().createPath(target, 0);
         boolean canReach = path != null && path.canReach();
-        boolean reachable = canReach || path != null && path.getTarget().closerThan((Vec3i)target, 3.0);
+        boolean reachable = canReach || path != null && path.getTarget().closerThan(target, 3.0);
         reachMemoPut(mob.getUUID(), key, now, reachable, canReach);
         return reachable;
     }
@@ -943,7 +1188,7 @@ public final class Homes {
         Path path = mob.getNavigation().createPath(target, 0);
         boolean canReach = path != null && path.canReach();
         // Record both flags so a later isReachable for the same target is served correctly.
-        boolean reachable = canReach || path != null && path.getTarget().closerThan((Vec3i)target, 3.0);
+        boolean reachable = canReach || path != null && path.getTarget().closerThan(target, 3.0);
         reachMemoPut(mob.getUUID(), key, now, reachable, canReach);
         return canReach;
     }
@@ -1017,7 +1262,7 @@ public final class Homes {
     }
 
     /** Topmost water block Y in the column whose heightmap surface is given. */
-    private static int waterLevelY(Level level, BlockPos surface) {
+    public static int waterLevelY(Level level, BlockPos surface) {
         BlockPos water = null;
         if (Homes.isWater(level, surface)) {
             water = surface;
@@ -1080,6 +1325,104 @@ public final class Homes {
         }
         inner.put(surfaceStandKey(x, z), result != null ? result : SURFACE_STAND_NULL);
         return result;
+    }
+
+    /**
+     * Anchors a raw navigation destination to the walkable surface stand the target column
+     * actually offers, fixing two failure modes of plain {@code moveTo(x,y,z)}:
+     *
+     * <ul>
+     *   <li><b>Impossible one-block jump:</b> goals that pass a fixed air/standing block (grass
+     *       patch, sleep spot, rest spot) can land exactly 1 block above the mob's walkable
+     *       surface. The pathfinder accepts it (1-block steps are allowed) but the mob's jump
+     *       never reliably clears it, so it bumps the block face and re-issues the same climb
+     *       node forever. This snaps the target to the true stand instead.</li>
+     *   <li><b>Water-level mismatch:</b> a swimming mob cannot climb onto a shore block above
+     *       its own water level, so water targets stay at the water surface.</li>
+     * </ul>
+     *
+     * Returns null when the column has no usable stand, or when the stand sits more than one
+     * block above the mob (an impossible climb for a grounded animal). Intentionally does NOT
+     * run {@link #isCliffSafe} — destination selection already handles cliffs, and this helper
+     * runs on every repath so it stays O(memoized surface lookups).
+     */
+    @Nullable
+    public static BlockPos surfaceStandForMove(Level level, BlockPos rawTarget, PathfinderMob mob) {
+        BlockPos stand = Homes.surfaceStand(level, rawTarget.getX(), rawTarget.getZ());
+        if (stand == null) {
+            return null;
+        }
+        if (mob.isInWater() || mob.isSwimming()) {
+            // A swimmer rides the water surface: only surface stands AT or BELOW its own
+            // water level are reachable (it cannot jump out of the water).
+            int waterY = Homes.waterLevelY(level, mob.blockPosition());
+            int standY = stand.getY();
+            if (!Homes.isDryLand(level, stand) || standY > waterY + 1) {
+                return null;
+            }
+            return stand;
+        }
+        // Grounded: a stand more than 1 block above the mob's own feet is an impossible climb.
+        int dy = stand.getY() - mob.blockPosition().getY();
+        if (dy > 1) {
+            return null;
+        }
+        if (!Homes.isDryLand(level, stand)) {
+            // Grounded animal cannot path onto a water stand (it would try to swim mid-walk).
+            return null;
+        }
+        return stand;
+    }
+
+    /**
+     * True when {@code stand} is inside the collision clear open — i.e. no solid block cell at
+     * the same level in any of the 4 orthogonal neighbors. A destination that abuts a solid
+     * block at the same level sits on the convex corner of a wall, where the mob's AABB clips
+     * the corner and the pathfinder retries the same node forever. Open ground returns fast.
+     */
+    public static boolean canStandAt(Level level, BlockPos stand) {
+        if (!level.getBlockState(stand).getCollisionShape(level, stand).isEmpty()) {
+            return false;
+        }
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            cursor.set(stand.getX() + dir.getStepX(), stand.getY(), stand.getZ() + dir.getStepZ());
+            if (!level.getBlockState(cursor).getCollisionShape(level, cursor).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * When a destination sits against the convex corner of a wall (a solid block neighbor at
+     * the same level), shifts it one block into the open so the mob can actually reach it. The
+     * 4 orthogonal neighbors are probed at the same surface level; the best open, dry neighbor
+     * wins. Returns the original stand when no open neighbor exists (pathing will just go
+     * around). Cheap: at most 4 neighbor reads, no cliff scan.
+     */
+    public static BlockPos offsetStandFromCorners(Level level, BlockPos stand) {
+        if (stand == null || Homes.canStandAt(level, stand)) {
+            return stand;
+        }
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        int standX = stand.getX();
+        int standY = stand.getY();
+        int standZ = stand.getZ();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            cursor.set(standX + dir.getStepX(), standY, standZ + dir.getStepZ());
+            if (!Homes.isDryLand(level, cursor) || !Homes.canStandAt(level, cursor)) {
+                continue;
+            }
+            double score = cursor.distSqr(stand);
+            if (score < bestScore) {
+                bestScore = score;
+                best = cursor.immutable();
+            }
+        }
+        return best != null ? best : stand;
     }
 
     public static boolean pathHasSteepStep(Path path, int maxStepY) {

@@ -1,17 +1,8 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.model.ChickenModel
- *  net.minecraft.client.model.geom.ModelPart
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Chicken
- */
 package com.charybdis180.ethological.client.sleep;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.client.HeadDip;
-import com.charybdis180.ethological.sleep.SleepAttachments;
+import com.charybdis180.ethological.client.sleep.SleepPose;
 import net.minecraft.client.model.ChickenModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.world.entity.LivingEntity;
@@ -48,9 +39,9 @@ extends ChickenModel<Chicken> {
 
     public void setupAnim(Chicken entity, float limbSwing, float limbSwingAmount, float ageInTicks, float netHeadYaw, float headPitch) {
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
-        boolean sleeping = (Boolean)entity.getData(SleepAttachments.SLEEPING);
-        boolean resting = (Boolean)entity.getData(SleepAttachments.RESTING);
-        if (sleeping || resting) {
+        boolean sleeping = (Boolean)entity.getData(ModAttachments.SLEEPING);
+        boolean resting = (Boolean)entity.getData(ModAttachments.RESTING);
+        if ((sleeping || resting) && SleepPose.lieDownModelsEnabled()) {
             this.body.y = 21.0f;
             if (sleeping) {
                 float headY = entity.isBaby() ? 17.5f : 20.5f;

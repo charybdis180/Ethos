@@ -1,15 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.model.SheepFurModel
- *  net.minecraft.client.model.geom.ModelPart
- *  net.minecraft.world.entity.animal.Sheep
- */
 package com.charybdis180.ethological.client.sleep;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.client.sleep.SleepPose;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import net.minecraft.client.model.SheepFurModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.world.entity.animal.Sheep;
@@ -45,9 +37,9 @@ extends SheepFurModel<Sheep> {
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
         ModelPart head = this.parts.head();
         ModelPart body = this.parts.body();
-        boolean sleeping = (Boolean)entity.getData(SleepAttachments.SLEEPING);
-        boolean resting = (Boolean)entity.getData(SleepAttachments.RESTING);
-        if (sleeping || resting) {
+        boolean sleeping = (Boolean)entity.getData(ModAttachments.SLEEPING);
+        boolean resting = (Boolean)entity.getData(ModAttachments.RESTING);
+        if ((sleeping || resting) && SleepPose.lieDownModelsEnabled()) {
             SleepPose.apply(this.parts, 13.5f, SleepPose.headY(20.0f, entity.isBaby(), 10.0f), -8.0f, 8.0f, this.defaultRightFrontX, this.defaultLeftFrontX, this.defaultRightHindX, this.defaultLeftHindX, 0.0f, 1.5f, resting, this.defaultBodyY, this.defaultHeadY);
             if (sleeping) {
                 head.yRot = 0.0f;

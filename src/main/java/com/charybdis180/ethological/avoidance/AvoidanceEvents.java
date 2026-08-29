@@ -1,12 +1,11 @@
 package com.charybdis180.ethological.avoidance;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.goal.AvoidHazardGoal;
 import com.charybdis180.ethological.avoidance.goal.YieldGoal;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.home.HomeSettingsManager;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepEvents;
-import com.charybdis180.ethological.social.SocialAttachments;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -85,6 +84,10 @@ public final class AvoidanceEvents {
         // including stationary ones. Must be before the hazard_reval gate below, which only
         // runs ~once a second.
         CrowdGrid.register(animal, now);
+        // Un-staggered cliff-lip guard: a crowd shoving toward a hard drop must be countered
+        // every tick or vanilla collision wins between the 3-5t separation passes. Self-gated
+        // on edge clearance + directional shove, so it costs one memoized lookup elsewhere.
+        CrowdGrid.edgeGuard(animal, serverLevel);
         // Revalidating the attached hazard (a pathfinder/world probe) is only worthwhile every
         // ~second — a burning portal block does not put itself out faster than that.
         if (com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "hazard_reval", now, 20L)) {
@@ -101,11 +104,11 @@ public final class AvoidanceEvents {
         // sleeping animal is never itself a "stuck mover"; only an awake, calm animal
         // with an active path tracks progress.
         if (com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "yield_detect", now, 5L)
-                && !animal.getData(SleepAttachments.SLEEPING).booleanValue()
-                && !animal.hasData(SleepAttachments.SLEEP_DISTURBANCE)
+                && !animal.getData(ModAttachments.SLEEPING).booleanValue()
+                && !animal.hasData(ModAttachments.SLEEP_DISTURBANCE)
                 && HerdManager.panicPhaseOf(animal, now) == HerdManager.PanicPhase.NONE
-                && !animal.hasData(SocialAttachments.PLAY)
-                && !animal.hasData(SocialAttachments.STARTLE)) {
+                && !animal.hasData(ModAttachments.PLAY)
+                && !animal.hasData(ModAttachments.STARTLE)) {
             CrowdYield.tick(animal, serverLevel, now);
         }
 
@@ -147,12 +150,12 @@ public final class AvoidanceEvents {
     }
 
     private static void expireHazardIfNeeded(Animal animal, ServerLevel level, long now) {
-        if (!animal.hasData(AvoidanceAttachments.HAZARD)) {
+        if (!animal.hasData(ModAttachments.HAZARD)) {
             return;
         }
-        AvoidanceHazard hazard = animal.getData(AvoidanceAttachments.HAZARD);
+        AvoidanceHazard hazard = animal.getData(ModAttachments.HAZARD);
         if (!Avoidance.hazardStillValid(level, hazard, animal.blockPosition(), now)) {
-            animal.removeData(AvoidanceAttachments.HAZARD);
+            animal.removeData(ModAttachments.HAZARD);
         }
     }
 
@@ -211,16 +214,16 @@ public final class AvoidanceEvents {
     }
 
     private static void notifyHazard(Animal animal, BlockPos hazardPos, long now) {
-        Optional<AvoidanceHazard> existing = animal.hasData(AvoidanceAttachments.HAZARD)
-                ? Optional.of(animal.getData(AvoidanceAttachments.HAZARD))
+        Optional<AvoidanceHazard> existing = animal.hasData(ModAttachments.HAZARD)
+                ? Optional.of(animal.getData(ModAttachments.HAZARD))
                 : Optional.empty();
         if (existing.isPresent()
                 && existing.get().pos().equals(hazardPos)
                 && now - existing.get().detectedGameTime() < 40L) {
             return;
         }
-        animal.setData(AvoidanceAttachments.HAZARD, new AvoidanceHazard(hazardPos.immutable(), now));
-        if (Boolean.TRUE.equals(animal.getData(SleepAttachments.SLEEPING))) {
+        animal.setData(ModAttachments.HAZARD, new AvoidanceHazard(hazardPos.immutable(), now));
+        if (Boolean.TRUE.equals(animal.getData(ModAttachments.SLEEPING))) {
             SleepEvents.wake(animal);
         }
     }

@@ -1,8 +1,7 @@
 package com.charybdis180.ethological.avoidance;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.MotherData;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -39,6 +38,10 @@ public final class CrowdGrid {
     private static final double SEPARATION_RADIUS_SQR = SEPARATION_RADIUS * SEPARATION_RADIUS;
     private static final double HARD_MIN_DIST = 0.6D;
     private static final double MAX_NUDGE = 0.12D;
+    /** Away-from-lip steer magnitude on a hard edge (doubles the normal cushion cap). */
+    private static final double EDGE_GUARD_NUDGE = 0.24D;
+    /** Probe radius for the edge guard's shove-direction check. */
+    private static final double EDGE_GUARD_PROBE_RADIUS = 3.0D;
     /** Staggered separation scan interval: 3-5 ticks by UUID. */
     static final int SEPARATE_INTERVAL_MIN = 3;
     static final int SEPARATE_INTERVAL_SPAN = 3;
@@ -46,6 +49,39 @@ public final class CrowdGrid {
     private static final Map<Long, Long> OCCUPIED = new ConcurrentHashMap<>();
 
     private CrowdGrid() {
+    }
+
+    /**
+     * Soft personal-space query for decision-time spacing: true when no other animal stands
+     * within {@code radius} blocks of the candidate spot (2D check, small Y band so stacked
+     * terrain does not false-positive). Unlike the physical nudge this never moves anything
+     * — callers use it to PREFER unoccupied ground when choosing where to walk or stand, so
+     * herds spread out without anyone being shoved.
+     */
+    public static boolean isSpaced(Level level, BlockPos pos, double radius) {
+        double cx = pos.getX() + 0.5D;
+        double cz = pos.getZ() + 0.5D;
+        int r = (int)Math.ceil(radius);
+        List<Animal> nearby = level.getEntitiesOfClass(Animal.class,
+                new net.minecraft.world.phys.AABB(
+                        pos.getX() - r - 1, pos.getY() - 4, pos.getZ() - r - 1,
+                        pos.getX() + r + 2, pos.getY() + 4, pos.getZ() + r + 2));
+        if (nearby.isEmpty()) {
+            return true;
+        }
+        double radiusSqr = radius * radius;
+        for (Animal other : nearby) {
+            if (!other.isAlive()) {
+                continue;
+            }
+            Vec3 p = other.position();
+            double dx = p.x() - cx;
+            double dz = p.z() - cz;
+            if (dx * dx + dz * dz < radiusSqr) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Records the animal's current feet cell as occupied until {@code gameTime + TTL}. */
@@ -102,17 +138,30 @@ public final class CrowdGrid {
      * Staggered separation pass. Writes the animal's own cell, then nudges it away from any
      * nearby animal (excluding its own nursing mother) when it is awake. Sleeping animals
      * never move — waking herd-mates keep clear of sleeping clumps instead.
+     *
+     * <p>Deliberately a light anti-interpenetration cushion (original 2.0/0.12 feel): the
+     * physical push is far too weak to spread a herd, and strengthening it just makes
+     * settled animals shove each other around with their bubbles. Wide spacing happens at
+     * decision time — station picking, sleep spots, shore stands.</p>
      */
     public static void separate(Animal animal, ServerLevel level, long now) {
         register(animal, now);
-        if (Boolean.TRUE.equals(animal.getData(SleepAttachments.SLEEPING))) {
+        if (Boolean.TRUE.equals(animal.getData(ModAttachments.SLEEPING))) {
             return;
         }
+        // A waterborne animal is mid-trek to the shore (seek-shore, beach, rejoin) and must
+        // be allowed to push through a sleeping clump on the bank — otherwise the cushion
+        // shoves it back into the pond forever. Sleeping herd-mates still never move, and
+        // land-based spacing is unchanged; only sleeping bodies stop cushioning a swimmer.
+        // Awake bodies (including a second swimmer in shallow water) still separate, so a
+        // migrating herd crossing a river keeps spreading out instead of balling up.
+        boolean swimmingToShore = animal.isInWaterOrBubble();
         List<Animal> nearby = level.getEntitiesOfClass(Animal.class,
                 animal.getBoundingBox().inflate(SEPARATION_RADIUS),
                 other -> other != animal
                         && other.isAlive()
-                        && !isNursingMother(animal, other));
+                        && !isNursingMother(animal, other)
+                        && !(swimmingToShore && Boolean.TRUE.equals(other.getData(ModAttachments.SLEEPING))));
         if (nearby.isEmpty()) {
             return;
         }
@@ -150,11 +199,53 @@ public final class CrowdGrid {
         nudge(animal, new Vec3(pushX * scale, 0.0D, pushZ * scale));
     }
 
+    /**
+     * Every-tick anti-shove guard for animals standing on or beside a hard cliff edge.
+     * The staggered {@link #separate} pass only fires every 3-5 ticks and its redirect uses
+     * the normal nudge budget — a dense vanilla-collision crowd shoving toward the lip can
+     * still out-push it between passes. This guard runs un-staggered with a doubled cap so
+     * the accumulated per-second displacement stays net-away from the drop. Directionally
+     * gated: it only fires when a neighbor stands on the field side of the animal (its
+     * collision push actually drives toward the lip), so a lone grazer at a scenic overlook
+     * is never herded inland.
+     */
+    public static void edgeGuard(Animal animal, ServerLevel level) {
+        if (Boolean.TRUE.equals(animal.getData(ModAttachments.SLEEPING))) {
+            return;
+        }
+        BlockPos stand = animal.blockPosition();
+        if (CliffAvoidance.edgeClearance(level, stand) == 0) {
+            return;
+        }
+        Vec3 away = CliffAvoidance.edgePushAway(level, stand);
+        if (away.lengthSqr() <= 1.0E-6D) {
+            return;
+        }
+        Vec3 self = animal.position();
+        List<Animal> nearby = level.getEntitiesOfClass(Animal.class,
+                animal.getBoundingBox().inflate(EDGE_GUARD_PROBE_RADIUS),
+                other -> other != animal && other.isAlive());
+        boolean shovedTowardLip = false;
+        for (Animal other : nearby) {
+            // Collision pushes self along (self - other); that vector gains a toward-lip
+            // component exactly when (other - self) points inland (+away).
+            Vec3 rel = other.position().subtract(self);
+            if (rel.x * away.x + rel.z * away.z > 0.15D) {
+                shovedTowardLip = true;
+                break;
+            }
+        }
+        if (!shovedTowardLip) {
+            return;
+        }
+        nudge(animal, away.scale(EDGE_GUARD_NUDGE));
+    }
+
     private static boolean isNursingMother(Animal baby, Animal other) {
-        if (!baby.isBaby() || !baby.hasData(HerdAttachments.MOTHER)) {
+        if (!baby.isBaby() || !baby.hasData(ModAttachments.MOTHER)) {
             return false;
         }
-        MotherData link = baby.getData(HerdAttachments.MOTHER);
+        MotherData link = baby.getData(ModAttachments.MOTHER);
         return link.isActive(baby.level().getGameTime()) && other.getUUID().equals(link.motherId());
     }
 

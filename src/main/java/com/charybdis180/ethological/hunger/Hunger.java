@@ -1,22 +1,11 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- */
 package com.charybdis180.ethological.hunger;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.home.Homes;
-import com.charybdis180.ethological.hunger.HungerAttachments;
 import com.charybdis180.ethological.hunger.HungerData;
 import com.charybdis180.ethological.hunger.HungerSettingsManager;
-import com.charybdis180.ethological.hunger.SpeciesHungerSettings;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
 import com.charybdis180.ethological.thirst.SpeciesThirstSettings;
@@ -41,16 +30,12 @@ public final class Hunger {
         return HungerSettingsManager.get(entity.getType()).isPresent();
     }
 
-    public static Optional<SpeciesHungerSettings> settingsOf(Entity entity) {
-        return HungerSettingsManager.get(entity.getType());
-    }
-
     public static boolean hasHungerData(Entity entity) {
-        return entity.hasData(HungerAttachments.HUNGER_DATA);
+        return entity.hasData(ModAttachments.HUNGER_DATA);
     }
 
     public static HungerData data(Entity entity) {
-        return (HungerData)entity.getData(HungerAttachments.HUNGER_DATA);
+        return (HungerData)entity.getData(ModAttachments.HUNGER_DATA);
     }
 
     public static int getHunger(Entity entity) {
@@ -78,11 +63,11 @@ public final class Hunger {
         if (Hunger.wantsFood((Entity)animal)) {
             return true;
         }
-        if (!animal.hasData(HerdAttachments.HERD_DATA) || !((level = animal.level()) instanceof ServerLevel)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA) || !((level = animal.level()) instanceof ServerLevel)) {
             return false;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        HerdManager.Herd herd = HerdManager.get(((HerdData)animal.getData(HerdAttachments.HERD_DATA)).herdId());
+        HerdManager.Herd herd = HerdManager.get(((HerdData)animal.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return false;
         }
@@ -100,22 +85,33 @@ public final class Hunger {
     }
 
     public static boolean isRuminating(Entity entity) {
-        return entity.hasData(HungerAttachments.RUMINATE_UNTIL) && entity.level().getGameTime() < (Long)entity.getData(HungerAttachments.RUMINATE_UNTIL);
+        return entity.hasData(ModAttachments.RUMINATE_UNTIL) && entity.level().getGameTime() < (Long)entity.getData(ModAttachments.RUMINATE_UNTIL);
+    }
+
+    /** How long the FA "eat/grazing" pose should play after a bite, in ticks. Matches the ~40-tick head-dip pulse so a full graze/chew cycle completes. */
+    public static final int EAT_ANIM_TICKS = 40;
+
+    public static boolean isEating(Entity entity) {
+        return entity.hasData(ModAttachments.EAT_UNTIL) && entity.level().getGameTime() < (Long)entity.getData(ModAttachments.EAT_UNTIL);
+    }
+
+    public static void beginEatAnim(Entity entity) {
+        entity.setData(ModAttachments.EAT_UNTIL, entity.level().getGameTime() + (long)EAT_ANIM_TICKS);
     }
 
     public static void beginRuminate(Animal animal) {
         long until = animal.level().getGameTime() + 40L + (long)animal.getRandom().nextInt(41);
-        animal.setData(HungerAttachments.RUMINATE_UNTIL,until);
+        animal.setData(ModAttachments.RUMINATE_UNTIL,until);
     }
 
     public static void beginHerdRuminate(Animal animal) {
         Level level;
         Hunger.beginRuminate(animal);
-        if (!animal.hasData(HerdAttachments.HERD_DATA) || !((level = animal.level()) instanceof ServerLevel)) {
+        if (!animal.hasData(ModAttachments.HERD_DATA) || !((level = animal.level()) instanceof ServerLevel)) {
             return;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        HerdManager.Herd herd = HerdManager.get(((HerdData)animal.getData(HerdAttachments.HERD_DATA)).herdId());
+        HerdManager.Herd herd = HerdManager.get(((HerdData)animal.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return;
         }
@@ -162,7 +158,7 @@ public final class Hunger {
     }
 
     public static void setData(Entity entity, HungerData data) {
-        entity.setData(HungerAttachments.HUNGER_DATA,data);
+        entity.setData(ModAttachments.HUNGER_DATA,data);
     }
 }
 

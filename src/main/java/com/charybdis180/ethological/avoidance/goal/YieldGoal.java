@@ -1,5 +1,6 @@
 package com.charybdis180.ethological.avoidance.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.CliffAvoidance;
 import com.charybdis180.ethological.avoidance.CrowdGrid;
 import com.charybdis180.ethological.avoidance.CrowdYield;
@@ -8,8 +9,6 @@ import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.goal.FollowPathing;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.sleep.SleepAttachments;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.thirst.Thirst;
 import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
@@ -58,14 +57,14 @@ public class YieldGoal extends Goal {
         if (!CrowdYield.hasActiveRequest(this.mob, now)) {
             return false;
         }
-        if (this.mob.getData(SleepAttachments.SLEEPING).booleanValue()
-                || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (this.mob.getData(ModAttachments.SLEEPING).booleanValue()
+                || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         if (HerdManager.panicPhaseOf(this.mob, now) != HerdManager.PanicPhase.NONE) {
             return false;
         }
-        if (this.mob.hasData(SocialAttachments.PLAY) || this.mob.hasData(SocialAttachments.STARTLE)) {
+        if (this.mob.hasData(ModAttachments.PLAY) || this.mob.hasData(ModAttachments.STARTLE)) {
             return false;
         }
         return !Hunger.isUrgentlyHungry(this.mob) && !Thirst.isUrgentlyThirsty(this.mob);

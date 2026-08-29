@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.world.Container
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.item.ItemEntity
- *  net.minecraft.world.item.ItemStack
- *  net.minecraft.world.level.Level
- */
 package com.charybdis180.ethological.block;
 
 import net.minecraft.core.BlockPos;

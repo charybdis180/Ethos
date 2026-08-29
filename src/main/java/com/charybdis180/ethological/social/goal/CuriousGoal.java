@@ -56,7 +56,7 @@ public class CuriousGoal extends Goal {
         return this.targetPlayer != null
                 && this.targetPlayer.isAlive()
                 && this.isHoldingFood(this.targetPlayer)
-                && (double)this.mob.distanceTo((Entity)this.targetPlayer) <= GIVE_UP_RANGE
+                && (double)this.mob.distanceTo(this.targetPlayer) <= GIVE_UP_RANGE
                 && this.watchTicks < WATCH_TICKS
                 && SocialCalm.stillCalm(this.mob);
     }
@@ -72,9 +72,9 @@ public class CuriousGoal extends Goal {
         if (this.targetPlayer == null) {
             return;
         }
-        this.mob.getLookControl().setLookAt((Entity)this.targetPlayer, 10.0f, (float)this.mob.getMaxHeadXRot());
+        this.mob.getLookControl().setLookAt(this.targetPlayer, 10.0f, (float)this.mob.getMaxHeadXRot());
         double watch = Familiarity.curiousWatchRange(this.mob, this.targetPlayer);
-        if ((double)this.mob.distanceTo((Entity)this.targetPlayer) <= watch) {
+        if ((double)this.mob.distanceTo(this.targetPlayer) <= watch) {
             this.mob.getNavigation().stop();
             if (++this.watchTicks >= WATCH_TICKS) {
                 this.cooldownUntilGameTime = this.mob.level().getGameTime() + COOLDOWN_TICKS;
@@ -84,7 +84,7 @@ public class CuriousGoal extends Goal {
         if (this.repathCooldown > 0) {
             --this.repathCooldown;
         } else {
-            this.mob.getNavigation().moveTo((Entity)this.targetPlayer, SPEED);
+            this.mob.getNavigation().moveTo(this.targetPlayer, SPEED);
             this.repathCooldown = REPATH_TICKS;
         }
     }

@@ -1,18 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.world.Container
- *  net.minecraft.world.entity.player.Inventory
- *  net.minecraft.world.entity.player.Player
- *  net.minecraft.world.inventory.AbstractContainerMenu
- *  net.minecraft.world.inventory.MenuType
- *  net.minecraft.world.inventory.Slot
- *  net.minecraft.world.item.ItemStack
- *  net.neoforged.neoforge.items.IItemHandler
- *  net.neoforged.neoforge.items.SlotItemHandler
- *  org.jetbrains.annotations.Nullable
- */
 package com.charybdis180.ethological.block;
 
 import com.charybdis180.ethological.block.FeederBlockEntity;

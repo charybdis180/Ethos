@@ -1,14 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.gui.GuiGraphics
- *  net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
- *  net.minecraft.network.chat.Component
- *  net.minecraft.resources.ResourceLocation
- *  net.minecraft.world.entity.player.Inventory
- *  net.minecraft.world.inventory.AbstractContainerMenu
- */
 package com.charybdis180.ethological.client;
 
 import com.charybdis180.ethological.block.FeederMenu;

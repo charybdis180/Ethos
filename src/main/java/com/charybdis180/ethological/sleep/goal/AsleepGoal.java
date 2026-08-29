@@ -1,14 +1,7 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- */
 package com.charybdis180.ethological.sleep.goal;
 
-import com.charybdis180.ethological.sleep.SleepAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
+
 import java.util.EnumSet;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.animal.Animal;
@@ -23,7 +16,7 @@ extends Goal {
     }
 
     public boolean canUse() {
-        return (Boolean)this.mob.getData(SleepAttachments.SLEEPING);
+        return (Boolean)this.mob.getData(ModAttachments.SLEEPING);
     }
 
     public boolean canContinueToUse() {

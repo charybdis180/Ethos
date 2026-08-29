@@ -1,15 +1,15 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.model.geom.ModelPart
- */
 package com.charybdis180.ethological.client.sleep;
 
+import com.charybdis180.ethological.config.EthologicalClientConfig;
 import net.minecraft.client.model.geom.ModelPart;
 
 public final class SleepPose {
     private SleepPose() {
+    }
+
+    /** True while Ethological's lying-down sleep/rest models are enabled (checked per frame). */
+    public static boolean lieDownModelsEnabled() {
+        return EthologicalClientConfig.CONFIG.sleepModelsEnabled();
     }
 
     /** Baked child parts of a model root — resolved once per model instead of per frame. */

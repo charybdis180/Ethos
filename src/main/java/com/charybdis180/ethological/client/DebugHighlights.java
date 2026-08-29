@@ -1,43 +1,14 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.blaze3d.vertex.PoseStack
- *  com.mojang.blaze3d.vertex.PoseStack$Pose
- *  com.mojang.blaze3d.vertex.VertexConsumer
- *  net.minecraft.client.Minecraft
- *  net.minecraft.client.renderer.LevelRenderer
- *  net.minecraft.client.renderer.MultiBufferSource$BufferSource
- *  net.minecraft.client.renderer.RenderType
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.item.Items
- *  net.minecraft.world.phys.Vec3
- *  net.neoforged.api.distmarker.Dist
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.fml.common.EventBusSubscriber
- *  net.neoforged.neoforge.client.event.RenderLevelStageEvent
- *  net.neoforged.neoforge.client.event.RenderLevelStageEvent$Stage
- *  net.neoforged.neoforge.event.entity.player.PlayerInteractEvent$EntityInteract
- */
 package com.charybdis180.ethological.client;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.CrowdYield;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.MotherData;
-import com.charybdis180.ethological.home.HomeAttachments;
 import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.FoodTargetData;
 import com.charybdis180.ethological.hunger.GrazePatches;
-import com.charybdis180.ethological.hunger.HungerAttachments;
-import com.charybdis180.ethological.sleep.SleepAttachments;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
 import com.charybdis180.ethological.thirst.WaterTargetData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -130,10 +101,10 @@ public final class DebugHighlights {
                 Vec3 to = from.add(Math.cos(heading) * 3.0, 0.0, Math.sin(heading) * 3.0);
                 DebugHighlights.drawLine(poseStack, lines, camera, from, to, 0.4f, 0.95f, 0.85f);
             }
-            if (animal.hasData(SleepAttachments.SLEEP_TARGET)) {
-                BlockPos sleepTarget = (BlockPos)animal.getData(SleepAttachments.SLEEP_TARGET);
+            if (animal.hasData(ModAttachments.SLEEP_TARGET)) {
+                BlockPos sleepTarget = (BlockPos)animal.getData(ModAttachments.SLEEP_TARGET);
                 DebugHighlights.drawBox(poseStack, lines, camera, sleepTarget, 0.95f, 0.35f, 0.85f);
-                DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), Vec3.atCenterOf((Vec3i)sleepTarget), 0.95f, 0.35f, 0.85f);
+                DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), Vec3.atCenterOf(sleepTarget), 0.95f, 0.35f, 0.85f);
             }
             List<Animal> neighbors = mc.level.getEntitiesOfClass(Animal.class, animal.getBoundingBox().inflate(6.0));
             int shown = 0;
@@ -150,25 +121,25 @@ public final class DebugHighlights {
                 } else {
                     DebugHighlights.drawBox(poseStack, lines, camera, home, 1.0f, 0.25f, 0.25f);
                 }
-                float radius = ((Float)animal.getData(HomeAttachments.LEASH_RADIUS)).floatValue();
+                float radius = ((Float)animal.getData(ModAttachments.LEASH_RADIUS)).floatValue();
                 if (radius > 0.5f) {
                     DebugHighlights.drawRing(poseStack, lines, camera, home, radius, 0.25f, 0.45f, 1.0f);
                 }
             }
-            if (animal.hasData(HungerAttachments.FOOD_TARGET)) {
-                BlockPos target = ((FoodTargetData)animal.getData(HungerAttachments.FOOD_TARGET)).pos();
+            if (animal.hasData(ModAttachments.FOOD_TARGET)) {
+                BlockPos target = ((FoodTargetData)animal.getData(ModAttachments.FOOD_TARGET)).pos();
                 DebugHighlights.drawBox(poseStack, lines, camera, target, 1.0f, 0.9f, 0.2f);
-                DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), Vec3.atCenterOf((Vec3i)target), 1.0f, 0.9f, 0.2f);
+                DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), Vec3.atCenterOf(target), 1.0f, 0.9f, 0.2f);
             }
             GrazePatches.effectivePatch(animal).ifPresent(patch -> {
                 DebugHighlights.drawBox(poseStack, lines, camera, patch, 0.45f, 0.95f, 0.25f);
                 DebugHighlights.drawRing(poseStack, lines, camera, patch, 8.0f, 0.35f, 0.85f, 0.2f);
             });
-            if (animal.hasData(ThirstAttachments.WATER_TARGET)) {
-                WaterTargetData water = (WaterTargetData)animal.getData(ThirstAttachments.WATER_TARGET);
+            if (animal.hasData(ModAttachments.WATER_TARGET)) {
+                WaterTargetData water = (WaterTargetData)animal.getData(ModAttachments.WATER_TARGET);
                 DebugHighlights.drawBox(poseStack, lines, camera, water.pos(), 0.2f, 0.85f, 1.0f);
                 DebugHighlights.drawBox(poseStack, lines, camera, water.shore(), 0.15f, 0.75f, 0.65f);
-                DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), Vec3.atCenterOf((Vec3i)water.shore()), 0.15f, 0.75f, 0.65f);
+                DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), Vec3.atCenterOf(water.shore()), 0.15f, 0.75f, 0.65f);
             }
             if (homeData.isEmpty()) {
                 Homes.effectiveMigrationHeading(animal).ifPresent(heading -> {
@@ -177,8 +148,8 @@ public final class DebugHighlights {
                     DebugHighlights.drawLine(poseStack, lines, camera, from, to, 1.0f, 0.2f, 0.85f);
                 });
             }
-            if (animal.hasData(HerdAttachments.HERD_DATA)) {
-                if (((HerdData)animal.getData(HerdAttachments.HERD_DATA)).alpha()) {
+            if (animal.hasData(ModAttachments.HERD_DATA)) {
+                if (((HerdData)animal.getData(ModAttachments.HERD_DATA)).alpha()) {
                     // Alpha highlighted: fan out lines to every rendered herd member.
                     HerdManager.Herd herd = HerdManager.herdOf(animal);
                     if (herd != null) {
@@ -198,8 +169,8 @@ public final class DebugHighlights {
                     });
                 }
             }
-            if (!animal.hasData(HerdAttachments.MOTHER)) continue;
-            UUID motherId = ((MotherData)animal.getData(HerdAttachments.MOTHER)).motherId();
+            if (!animal.hasData(ModAttachments.MOTHER)) continue;
+            UUID motherId = ((MotherData)animal.getData(ModAttachments.MOTHER)).motherId();
             Entity mother = entitiesById.get(motherId);
             if (mother != null) {
                 DebugHighlights.drawLine(poseStack, lines, camera, animal.getEyePosition(1.0f), mother.getEyePosition(1.0f), 1.0f, 0.45f, 0.75f);

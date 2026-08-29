@@ -1,32 +1,6 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Position
- *  net.minecraft.core.Vec3i
- *  net.minecraft.sounds.SoundEvent
- *  net.minecraft.sounds.SoundEvents
- *  net.minecraft.sounds.SoundSource
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.PathfinderMob
- *  net.minecraft.world.entity.ai.goal.MoveToBlockGoal
- *  net.minecraft.world.entity.ai.util.DefaultRandomPos
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.entity.animal.Chicken
- *  net.minecraft.world.entity.animal.Cow
- *  net.minecraft.world.entity.animal.Pig
- *  net.minecraft.world.entity.animal.Sheep
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.LevelReader
- *  net.minecraft.world.level.block.Block
- *  net.minecraft.world.level.block.Blocks
- *  net.minecraft.world.level.block.entity.BlockEntity
- *  net.minecraft.world.level.block.state.BlockState
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.hunger.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.ModSounds;
 import com.charybdis180.ethological.block.ChickenFeederBlock;
 import com.charybdis180.ethological.block.FeederBlock;
@@ -37,6 +11,7 @@ import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
 import com.charybdis180.ethological.herd.SpeciesHerdSettings;
 import com.charybdis180.ethological.home.HomeSettingsManager;
+import com.charybdis180.ethological.home.FenceDetection;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.home.NomadicMigration;
 import com.charybdis180.ethological.home.SpeciesHomeSettings;
@@ -45,12 +20,11 @@ import com.charybdis180.ethological.hunger.GrazePatchData;
 import com.charybdis180.ethological.hunger.GrazePatches;
 import com.charybdis180.ethological.hunger.PastureRecovery;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.hunger.HungerAttachments;
 import com.charybdis180.ethological.hunger.HungerSettingsManager;
 import com.charybdis180.ethological.hunger.SpeciesHungerSettings;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -124,11 +98,19 @@ extends MoveToBlockGoal {
     private List<Vec3> feedingMatePositions = List.of();
     private ItemEntity seedTarget;
     private long nextSeedScanGameTime;
+    // Pen interior flood region (null when not fenced in): while non-null every food
+    // target must sit inside it, so penned animals stop fixating on grass across the
+    // fence and search within their enclosure instead. Resolved once per scan.
+    private LongSet penRegion;
+    private int penRefY;
     // herdWantsFood scans the whole herd (getEntity + attachment per member) — cache per-animal with a 20-tick TTL.
     private long herdWantsFoodCheckGameTime = Long.MIN_VALUE;
     private boolean herdWantsFoodCached;
     // Mirror of the horizontal search range passed to super — the merged scan iterates it directly.
     private final int foodSearchRange;
+    /** Pig-only: the paired RootForageGoal, notified when our food scans keep failing so it
+     *  can take over (rooting), and reset when we find food or the pig digs successfully. */
+    private RootForageGoal rootSibling;
 
     public EatFoodGoal(Animal animal, double speedModifier, int searchRange, int verticalSearchRange) {
         super((PathfinderMob)animal, speedModifier, searchRange, verticalSearchRange);
@@ -136,12 +118,36 @@ extends MoveToBlockGoal {
         this.foodSearchRange = searchRange;
     }
 
+    /** Pairs this goal with the pig's RootForageGoal for failure/success signaling. */
+    public void setRootSibling(RootForageGoal sibling) {
+        this.rootSibling = sibling;
+    }
+
+    private void noteRootFailure() {
+        if (this.rootSibling != null && this.animal instanceof Pig) {
+            this.rootSibling.noteSearchFailure();
+        }
+    }
+
+    /** Rooting succeeded or normal food was found again: clear both goals' failure streaks. */
+    public void onSiblingSuccess() {
+        this.failedSearches = 0;
+        this.foragingFar = false;
+        this.nextEatGameTime = Math.max(this.nextEatGameTime,
+                this.animal.level().getGameTime());
+    }
+
+    /** Lets the rooting goal extend this goal's eat cooldown so pigs alternate behaviors sanely. */
+    public void deferUntil(long gameTime) {
+        this.nextEatGameTime = Math.max(this.nextEatGameTime, gameTime);
+    }
+
     private SpeciesHungerSettings settings() {
         return HungerSettingsManager.get(this.animal.getType()).orElse(null);
     }
 
     private boolean shouldSeekFood(SpeciesHungerSettings settings) {
-        return (float)Hunger.getHunger((Entity)this.animal) < (float)settings.maxHunger() * settings.searchThresholdPercent();
+        return (float)Hunger.getHunger(this.animal) < (float)settings.maxHunger() * settings.searchThresholdPercent();
     }
 
     private boolean isPatchLeader() {
@@ -149,7 +155,7 @@ extends MoveToBlockGoal {
     }
 
     private void clearGrazePatch() {
-        this.animal.removeData(HungerAttachments.GRAZE_PATCH);
+        this.animal.removeData(ModAttachments.GRAZE_PATCH);
         this.eatsThisPatch = 0;
         this.lingerTicks = 0;
     }
@@ -177,20 +183,20 @@ extends MoveToBlockGoal {
                 && !Hunger.isUrgentlyHungry((Entity) this.animal)) {
             return false;
         }
-        if (((Boolean)this.animal.getData(SleepAttachments.SLEEPING)).booleanValue() || this.animal.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (this.animal.getData(ModAttachments.SLEEPING) || this.animal.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
-        if (Hunger.isRuminating((Entity)this.animal)) {
+        if (Hunger.isRuminating(this.animal)) {
             // A stale herd-ruminate timer (stamped by beginHerdRuminate on every member)
             // must not starve a hungry animal — clear it so the urgent eat proceeds.
-            if (Hunger.isUrgentlyHungry((Entity)this.animal)) {
-                this.animal.removeData(HungerAttachments.RUMINATE_UNTIL);
+            if (Hunger.isUrgentlyHungry(this.animal)) {
+                this.animal.removeData(ModAttachments.RUMINATE_UNTIL);
             } else {
                 return false;
             }
         }
         boolean daytime = Hunger.isDaytimeGrazeWindow(this.animal);
-        boolean urgent = Hunger.isUrgentlyHungry((Entity)this.animal);
+        boolean urgent = Hunger.isUrgentlyHungry(this.animal);
         if (daytime) {
             this.nightEating = false;
         } else if (urgent) {
@@ -199,11 +205,11 @@ extends MoveToBlockGoal {
         if (!daytime && !this.nightEating) {
             return false;
         }
-        if (!daytime && !Hunger.wantsFood((Entity)this.animal)) {
+        if (!daytime && !Hunger.wantsFood(this.animal)) {
             this.nightEating = false;
             return false;
         }
-        this.nextStartTick = this.nextStartTick((PathfinderMob)this.animal);
+        this.nextStartTick = this.nextStartTick(this.animal);
         this.herdClaims = HerdManager.foodTargetsOfHerdMates(this.animal);
         this.finished = false;
         this.travelingToPatch = false;
@@ -224,22 +230,23 @@ extends MoveToBlockGoal {
 
     private boolean beginLeaderGraze(SpeciesHungerSettings settings) {
         Optional<Object> patch;
-        Optional<Object> optional = patch = this.animal.hasData(HungerAttachments.GRAZE_PATCH) ? Optional.of(((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center()) : Optional.empty();
+        Optional<Object> optional = patch = this.animal.hasData(ModAttachments.GRAZE_PATCH) ? Optional.of(((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center()) : Optional.empty();
         if (patch.isEmpty() || this.patchExhausted((BlockPos)patch.get(), settings)) {
             if (patch.isPresent()) {
                 this.retirePatch((BlockPos)patch.get());
             }
             if (!this.pickNewPatch(settings)) {
+                this.noteRootFailure();
                 if (++this.failedSearches >= 3) {
                     this.foragingFar = true;
                 }
                 return false;
             }
-            patch = Optional.of(((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center());
+            patch = Optional.of(((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center());
             this.eatsThisPatch = 0;
             this.lingerTicks = 0;
         }
-        if (Hunger.wantsFood((Entity)this.animal) && this.eatsThisPatch < settings.eatsPerPatch()) {
+        if (Hunger.wantsFood(this.animal) && this.eatsThisPatch < settings.eatsPerPatch()) {
             if (this.tryClaimSeedTarget()) {
                 this.start();
                 return true;
@@ -247,13 +254,13 @@ extends MoveToBlockGoal {
             boolean found = this.findNearestBlock();
             if (found) {
                 this.failedSearches = 0;
-                this.animal.setData(HungerAttachments.FOOD_TARGET,new FoodTargetData(this.blockPos.immutable()));
+                this.animal.setData(ModAttachments.FOOD_TARGET,new FoodTargetData(this.blockPos.immutable()));
                 return true;
             }
             this.retirePatch((BlockPos)patch.get());
             return this.pickNewPatch(settings) && this.pathToCurrentPatch();
         }
-        if (this.animal.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)patch.get()))) > 9.0) {
+        if (this.animal.distanceToSqr(Vec3.atCenterOf(((Vec3i)patch.get()))) > 9.0) {
             return this.pathToCurrentPatch();
         }
         this.lingerTicks = settings.grazeLingerTicksMin() + this.animal.getRandom().nextInt(Math.max(1, settings.grazeLingerTicksSpan()));
@@ -263,7 +270,7 @@ extends MoveToBlockGoal {
     }
 
     private boolean beginMemberOrUrgentGraze(SpeciesHungerSettings settings, boolean daytime) {
-        if (!this.shouldSeekFood(settings) && !Hunger.isUrgentlyHungry((Entity)this.animal) && !this.nightEating) {
+        if (!this.shouldSeekFood(settings) && !Hunger.isUrgentlyHungry(this.animal) && !this.nightEating) {
             return false;
         }
         if (this.tryClaimSeedTarget()) {
@@ -272,10 +279,11 @@ extends MoveToBlockGoal {
         boolean found = this.findNearestBlock();
         if (found) {
             this.failedSearches = 0;
-            this.animal.setData(HungerAttachments.FOOD_TARGET,new FoodTargetData(this.blockPos.immutable()));
+            this.animal.setData(ModAttachments.FOOD_TARGET,new FoodTargetData(this.blockPos.immutable()));
             return true;
         }
-        if (Hunger.isUrgentlyHungry((Entity)this.animal)) {
+        this.noteRootFailure();
+        if (Hunger.isUrgentlyHungry(this.animal)) {
             return this.beginSearchWalk();
         }
         if (daytime && ++this.failedSearches >= 3) {
@@ -285,8 +293,24 @@ extends MoveToBlockGoal {
     }
 
     private boolean beginSearchWalk() {
-        Vec3 target = DefaultRandomPos.getPos((PathfinderMob)this.animal, (int)16, (int)5);
+        Vec3 target = DefaultRandomPos.getPos(this.animal, (int)16, (int)5);
+        // DefaultRandomPos legitimately returns null (no reachable wander point found) —
+        // bail before anything dereferences it.
         if (target == null) {
+            return false;
+        }
+        // Penned animals search-walk INSIDE the fence: a random walk target across the
+        // wall would pin the starving animal against the fence line. Re-roll a few times;
+        // if the pen is too tight for a valid roll, stand pat this attempt instead.
+        for (int i = 0; i < 4 && FenceDetection.excludes(this.animal.level(), this.penRegion,
+                BlockPos.containing((Position)target), this.penRefY); ++i) {
+            target = DefaultRandomPos.getPos(this.animal, (int)16, (int)5);
+            if (target == null) {
+                return false;
+            }
+        }
+        if (FenceDetection.excludes(this.animal.level(), this.penRegion,
+                BlockPos.containing((Position)target), this.penRefY)) {
             return false;
         }
         this.searchWalking = true;
@@ -295,12 +319,12 @@ extends MoveToBlockGoal {
     }
 
     private boolean pathToCurrentPatch() {
-        if (!this.animal.hasData(HungerAttachments.GRAZE_PATCH)) {
+        if (!this.animal.hasData(ModAttachments.GRAZE_PATCH)) {
             return false;
         }
-        this.blockPos = ((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center();
+        this.blockPos = ((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center();
         this.travelingToPatch = true;
-        this.animal.removeData(HungerAttachments.FOOD_TARGET);
+        this.animal.removeData(ModAttachments.FOOD_TARGET);
         return true;
     }
 
@@ -309,9 +333,13 @@ extends MoveToBlockGoal {
         this.prepareSearch(settings);
         BlockPos origin = this.animal.blockPosition();
         int radius = this.searchRadius(settings);
-        Predicate<BlockPos> allow = pos -> this.withinHomeLeash((BlockPos)pos) && !this.isBlacklistedPatch((BlockPos)pos, settings);
+        // Pen-aware allow predicate: inside a fence the patch must sit in the enclosure,
+        // regardless of urgency (the urgent bypass below drops the leash, not the pen).
+        Predicate<BlockPos> allow = pos -> !FenceDetection.excludes(this.animal.level(), this.penRegion, (BlockPos)pos, this.penRefY)
+                && this.withinHomeLeash((BlockPos)pos)
+                && !this.isBlacklistedPatch((BlockPos)pos, settings);
         Optional<BlockPos> found = Optional.empty();
-        if (!Hunger.isUrgentlyHungry((Entity)this.animal) && !(pasture = EatFoodGoal.pastureFoods(settings)).isEmpty()) {
+        if (!Hunger.isUrgentlyHungry(this.animal) && !(pasture = EatFoodGoal.pastureFoods(settings)).isEmpty()) {
             found = GrazePatches.findPatch(this.animal.level(), origin, radius, pasture, allow);
         }
         if (found.isEmpty()) {
@@ -324,11 +352,11 @@ extends MoveToBlockGoal {
             this.clearGrazePatch();
             return false;
         }
-        if (!Homes.isReachable((PathfinderMob)this.animal, (BlockPos)found.get())) {
+        if (!Homes.isReachable(this.animal, (BlockPos)found.get())) {
             this.retirePatch((BlockPos)found.get());
             return false;
         }
-        this.animal.setData(HungerAttachments.GRAZE_PATCH,new GrazePatchData((BlockPos)found.get()));
+        this.animal.setData(ModAttachments.GRAZE_PATCH,new GrazePatchData((BlockPos)found.get()));
         this.eatsThisPatch = 0;
         this.lingerTicks = 0;
         this.failedSearches = 0;
@@ -352,7 +380,7 @@ extends MoveToBlockGoal {
 
     private boolean isBlacklistedPatch(BlockPos pos, SpeciesHungerSettings settings) {
         int radius = settings != null ? settings.patchGrazeRadius() : 8;
-        return this.blacklistedPatch != null && pos.closerThan((Vec3i)this.blacklistedPatch, (double)radius) && this.animal.level().getGameTime() < this.blacklistUntilGameTime;
+        return this.blacklistedPatch != null && pos.closerThan(this.blacklistedPatch, (double)radius) && this.animal.level().getGameTime() < this.blacklistUntilGameTime;
     }
 
     /** {@link Hunger#herdWantsFood} memoized for up to 20 ticks — a grazing herd need not be re-scanned every tick. */
@@ -410,10 +438,10 @@ extends MoveToBlockGoal {
             return !this.finished
                     && this.seedTarget.isAlive()
                     && !this.seedTarget.getItem().isEmpty()
-                    && !((Boolean)this.animal.getData(SleepAttachments.SLEEPING)).booleanValue()
-                    && !this.animal.hasData(SleepAttachments.SLEEP_DISTURBANCE);
+                    && !this.animal.getData(ModAttachments.SLEEPING)
+                    && !this.animal.hasData(ModAttachments.SLEEP_DISTURBANCE);
         }
-        if (this.finished || ((Boolean)this.animal.getData(SleepAttachments.SLEEPING)).booleanValue() || this.animal.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (this.finished || this.animal.getData(ModAttachments.SLEEPING) || this.animal.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         if (this.isPatchLeader() && Hunger.isDaytimeGrazeWindow(this.animal) && !this.herdWantsFoodCached()) {
@@ -422,7 +450,7 @@ extends MoveToBlockGoal {
             return false;
         }
         if (this.travelingToPatch) {
-            return this.lingerTicks > 0 || this.animal.distanceToSqr(Vec3.atCenterOf((Vec3i)this.blockPos)) > 9.0;
+            return this.lingerTicks > 0 || this.animal.distanceToSqr(Vec3.atCenterOf(this.blockPos)) > 9.0;
         }
         if (this.searchWalking) {
             return this.tryTicks <= 600 && !this.animal.getNavigation().isDone();
@@ -442,18 +470,30 @@ extends MoveToBlockGoal {
     public void start() {
         this.finished = false;
         if (this.seedTarget != null) {
-            this.animal.removeData(HungerAttachments.FOOD_TARGET);
+            this.animal.removeData(ModAttachments.FOOD_TARGET);
             this.animal.getNavigation().moveTo(this.seedTarget, this.speedModifier);
             return;
         }
         if (!this.travelingToPatch && !this.searchWalking) {
-            this.animal.setData(HungerAttachments.FOOD_TARGET,new FoodTargetData(this.blockPos.immutable()));
+            this.animal.setData(ModAttachments.FOOD_TARGET,new FoodTargetData(this.blockPos.immutable()));
         }
         super.start();
+        // Vanilla MoveToBlockGoal aims at blockPos.getY()+1 (the air above the stand) — the
+        // classic "bump the block face forever" jump-loop. Re-aim at the true surface stand
+        // once, so the very first path respects the ground instead of the air above it.
+        if (this.travelingToPatch && this.animal.getNavigation().isDone()) {
+            BlockPos anchored = Homes.surfaceStandForMove(this.animal.level(), this.blockPos, this.animal);
+            if (anchored != null) {
+                anchored = Homes.offsetStandFromCorners(this.animal.level(), anchored);
+                this.animal.getNavigation().moveTo(
+                        (double)anchored.getX() + 0.5, (double)anchored.getY(), (double)anchored.getZ() + 0.5,
+                        this.speedModifier);
+            }
+        }
     }
 
     public void stop() {
-        this.animal.removeData(HungerAttachments.FOOD_TARGET);
+        this.animal.removeData(ModAttachments.FOOD_TARGET);
         this.travelingToPatch = false;
         this.searchWalking = false;
         this.isFeederTarget = false;
@@ -464,8 +504,13 @@ extends MoveToBlockGoal {
     /** Computes everything in isValidTarget that doesn't depend on the candidate position, once per block scan. */
     private void prepareSearch(SpeciesHungerSettings settings) {
         this.searchSettings = settings;
-        this.searchUrgent = Hunger.isUrgentlyHungry((Entity)this.animal);
+        this.searchUrgent = Hunger.isUrgentlyHungry(this.animal);
         this.searchIsLeader = this.isPatchLeader();
+        // Pen gate FIRST, so it also constrains the urgent bypass below: a fenced-in
+        // animal must search its own enclosure even while starving — grass across the
+        // fence is not food it can ever reach. Null (free-roaming) imposes nothing.
+        this.penRegion = FenceDetection.pennedRegionOf(this.animal);
+        this.penRefY = this.animal.blockPosition().getY();
         this.leashHome = null;
         Optional<SpeciesHomeSettings> homeSettings = HomeSettingsManager.get(this.animal.getType());
         Optional<SpeciesSleepSettings> sleepSettings = SleepSettingsManager.get(this.animal.getType());
@@ -478,8 +523,8 @@ extends MoveToBlockGoal {
         this.activePatchCenter = null;
         this.anchorPos = null;
         if (this.searchIsLeader) {
-            if (this.animal.hasData(HungerAttachments.GRAZE_PATCH)) {
-                this.activePatchCenter = ((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center();
+            if (this.animal.hasData(ModAttachments.GRAZE_PATCH)) {
+                this.activePatchCenter = ((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center();
             }
         } else {
             Optional<BlockPos> patch = GrazePatches.effectivePatch(this.animal);
@@ -502,7 +547,7 @@ extends MoveToBlockGoal {
             return false;
         }
         this.prepareSearch(settings);
-        this.preferPastureOnly = !Hunger.isUrgentlyHungry((Entity)this.animal);
+        this.preferPastureOnly = !Hunger.isUrgentlyHungry(this.animal);
         // Single spiral scan (identical order to vanilla MoveToBlockGoal) classifies every candidate:
         // the nearest feeder wins outright, else the nearest pasture food, else the nearest non-pasture
         // food — matching the old feeder-then-pasture-then-any scan sequence without rescanning.
@@ -557,7 +602,7 @@ extends MoveToBlockGoal {
         }
         if (this.preferPastureOnly) {
             if (pasture != null) {
-                if (Homes.isReachable((PathfinderMob)this.animal, pasture)) {
+                if (Homes.isReachable(this.animal, pasture)) {
                     this.blockPos = pasture;
                     this.isFeederTarget = false;
                     return true;
@@ -567,7 +612,7 @@ extends MoveToBlockGoal {
                 this.unreachableUntilGameTime = now + 1200L;
             }
             if (nonPasture != null) {
-                if (Homes.isReachable((PathfinderMob)this.animal, nonPasture)) {
+                if (Homes.isReachable(this.animal, nonPasture)) {
                     this.blockPos = nonPasture;
                     this.isFeederTarget = false;
                     return true;
@@ -579,7 +624,7 @@ extends MoveToBlockGoal {
             return false;
         }
         if (anyFood != null) {
-            if (Homes.isReachable((PathfinderMob)this.animal, anyFood)) {
+            if (Homes.isReachable(this.animal, anyFood)) {
                 this.blockPos = anyFood;
                 this.isFeederTarget = false;
                 return true;
@@ -594,10 +639,13 @@ extends MoveToBlockGoal {
     /**
      * Single-scan target classifier: {@code 1} = feeder, {@code 2} = pasture food,
      * {@code 3} = non-pasture food (kept as fallback even during the pasture-only pass),
-     * {@code 0} = invalid. Mirrors {@link #isValidTarget}'s gates.
+     * {@code 0} = invalid. {@link #isValidTarget} delegates here.
      */
     private int classifyTarget(LevelReader level, BlockPos pos, SpeciesHungerSettings settings) {
         if (this.unreachablePos != null && pos.equals(this.unreachablePos) && this.animal.level().getGameTime() < this.unreachableUntilGameTime) {
+            return 0;
+        }
+        if (FenceDetection.excludes(this.animal.level(), this.penRegion, pos, this.penRefY)) {
             return 0;
         }
         if (this.herdClaims.contains(pos) || this.herdClaims.contains(pos.above())) {
@@ -631,49 +679,17 @@ extends MoveToBlockGoal {
         return pasture ? 2 : 3;
     }
 
+    /** Sole target gate: the classifier's verdict (feeder/pasture/other food) is "valid". */
     protected boolean isValidTarget(LevelReader level, BlockPos pos) {
         SpeciesHungerSettings settings = this.searchSettings != null ? this.searchSettings : this.settings();
-        if (settings == null) {
-            return false;
-        }
-        if (this.unreachablePos != null && pos.equals(this.unreachablePos) && this.animal.level().getGameTime() < this.unreachableUntilGameTime) {
-            return false;
-        }
-        if (this.herdClaims.contains(pos) || this.herdClaims.contains(pos.above())) {
-            return false;
-        }
-        if (this.searchingFeeder) {
-            return this.isValidFeederTarget(level, pos, settings);
-        }
-        if (!GrazePatches.isStandForFood(level, pos, settings.foodBlocks())) {
-            return false;
-        }
-        Block food = GrazePatches.foodBlockAtStand(level, pos, settings.foodBlocks());
-        if (this.preferPastureOnly && !SpeciesHungerSettings.isPastureFood(food)) {
-            return false;
-        }
-        if (food instanceof CropBlock) {
-            CropBlock crop = (CropBlock)food;
-            BlockState above = level.getBlockState(pos.above());
-            BlockState foodState = above.getBlock() == food ? above : level.getBlockState(pos);
-            if (!crop.isMaxAge(foodState)) {
-                return false;
-            }
-        }
-        if (!(this.withinHomeLeash(pos) || this.foragingFar || this.searchUrgent)) {
-            return false;
-        }
-        if (!this.searchUrgent && this.isMateTooCloseToStand(pos)) {
-            return false;
-        }
-        return this.withinActivePatchOrAlpha(pos, settings);
+        return settings != null && this.classifyTarget(level, pos, settings) != 0;
     }
 
     private boolean isMateTooCloseToStand(BlockPos stand) {
         if (this.feedingMatePositions.isEmpty()) {
             return false;
         }
-        Vec3 center = Vec3.atCenterOf((Vec3i)stand);
+        Vec3 center = Vec3.atCenterOf(stand);
         for (Vec3 mate : this.feedingMatePositions) {
             if (!(mate.distanceToSqr(center) < this.grazeSpacingSqr)) continue;
             return true;
@@ -681,35 +697,24 @@ extends MoveToBlockGoal {
         return false;
     }
 
-    /*
-     * Enabled force condition propagation
-     * Lifted jumps to return sites
-     */
     private boolean isValidFeederTarget(LevelReader level, BlockPos pos, SpeciesHungerSettings settings) {
         BlockState state = level.getBlockState(pos);
         Block block = state.getBlock();
-        if (this.animal instanceof Chicken) {
-            if (!(block instanceof ChickenFeederBlock)) {
-                return false;
-            }
-        } else {
-            if (!(this.animal instanceof Cow) && !(this.animal instanceof Pig) && !(this.animal instanceof Sheep)) return false;
-            if (!(block instanceof TroughBlock)) {
-                return false;
-            }
-            // Prefer SIDE stands so animals path beside the trough, not into the CENTER inventory block.
-            if (state.getValue(TroughBlock.PART) != TroughBlock.Part.SIDE) {
-                return false;
-            }
+        if (!switch (this.animal) {
+            case Chicken chicken -> block instanceof ChickenFeederBlock;
+            case Cow cow -> true;
+            case Pig pig -> true;
+            case Sheep sheep -> block instanceof TroughBlock
+                    // Prefer SIDE stands so animals path beside the trough, not into the CENTER inventory block.
+                    && state.getValue(TroughBlock.PART) == TroughBlock.Part.SIDE;
+            default -> false;
+        }) {
+            return false;
         }
-        if (!(level instanceof Level)) return false;
-        Level realLevel = (Level)level;
+        if (!(level instanceof Level realLevel)) return false;
         BlockPos feederPos = EatFoodGoal.resolveFeederEntityPos(realLevel, pos, state);
-        BlockEntity be = realLevel.getBlockEntity(feederPos);
-        if (!(be instanceof FeederBlockEntity)) return false;
-        FeederBlockEntity feeder = (FeederBlockEntity)be;
-        if (feeder.hasFood()) return this.withinHomeLeash(pos) || this.foragingFar || this.searchUrgent;
-        return false;
+        if (!(realLevel.getBlockEntity(feederPos) instanceof FeederBlockEntity feeder)) return false;
+        return feeder.hasFood() && (this.withinHomeLeash(pos) || this.foragingFar || this.searchUrgent);
     }
 
     /** SIDE trough parts have no BE — resolve to the CENTER inventory block. */
@@ -741,12 +746,12 @@ extends MoveToBlockGoal {
         }
         double grazeRadius = (double)settings.patchGrazeRadius() + 0.5;
         if (this.searchIsLeader) {
-            return this.activePatchCenter == null || pos.closerThan((Vec3i)this.activePatchCenter, grazeRadius);
+            return this.activePatchCenter == null || pos.closerThan(this.activePatchCenter, grazeRadius);
         }
         if (this.activePatchCenter != null) {
-            return pos.closerThan((Vec3i)this.activePatchCenter, grazeRadius);
+            return pos.closerThan(this.activePatchCenter, grazeRadius);
         }
-        return this.anchorPos == null || pos.closerThan((Vec3i)this.anchorPos, this.anchorRadius);
+        return this.anchorPos == null || pos.closerThan(this.anchorPos, this.anchorRadius);
     }
 
     private boolean withinHomeLeash(BlockPos pos) {
@@ -756,7 +761,7 @@ extends MoveToBlockGoal {
         if (this.leashHome == null) {
             return true;
         }
-        return pos.distSqr((Vec3i)this.leashHome) <= this.leashRadiusSqr;
+        return pos.distSqr(this.leashHome) <= this.leashRadiusSqr;
     }
 
     public void tick() {
@@ -812,16 +817,16 @@ extends MoveToBlockGoal {
                 this.finished = true;
                 return;
             }
-            if (!Hunger.wantsFood((Entity)this.animal) && this.animal.hasData(HungerAttachments.GRAZE_PATCH)) {
+            if (!Hunger.wantsFood(this.animal) && this.animal.hasData(ModAttachments.GRAZE_PATCH)) {
                 this.lingerTicks = settings.grazeLingerTicksMin() + this.animal.getRandom().nextInt(Math.max(1, settings.grazeLingerTicksSpan()));
                 this.travelingToPatch = true;
-                this.animal.removeData(HungerAttachments.FOOD_TARGET);
-                this.blockPos = ((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center();
+                this.animal.removeData(ModAttachments.FOOD_TARGET);
+                this.blockPos = ((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center();
                 return;
             }
             if (this.eatsThisPatch >= settings.eatsPerPatch()) {
                 BlockPos center;
-                if (this.animal.hasData(HungerAttachments.GRAZE_PATCH) && this.patchExhausted(center = ((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center(), settings)) {
+                if (this.animal.hasData(ModAttachments.GRAZE_PATCH) && this.patchExhausted(center = ((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center(), settings)) {
                     this.retirePatch(center);
                     Hunger.beginRuminate(this.animal);
                 }
@@ -829,7 +834,7 @@ extends MoveToBlockGoal {
                 return;
             }
         }
-        if (Hunger.wantsFood((Entity)this.animal) && this.eatsThisPatch < settings.eatsPerPatch()) {
+        if (Hunger.wantsFood(this.animal) && this.eatsThisPatch < settings.eatsPerPatch()) {
             if (this.isFeederTarget) {
                 FeederBlockEntity feeder = this.feederAtTarget();
                 if (feeder != null && feeder.hasFood()) {
@@ -843,18 +848,19 @@ extends MoveToBlockGoal {
                 this.start();
                 return;
             }
-            if (this.isPatchLeader() && this.animal.hasData(HungerAttachments.GRAZE_PATCH)) {
-                this.retirePatch(((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center());
+            this.noteRootFailure();
+            if (this.isPatchLeader() && this.animal.hasData(ModAttachments.GRAZE_PATCH)) {
+                this.retirePatch(((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center());
             }
         }
-        if (!Hunger.wantsFood((Entity)this.animal)) {
+        if (!Hunger.wantsFood(this.animal)) {
             Hunger.beginRuminate(this.animal);
         }
         this.finished = true;
     }
 
     private void tickTravelOrLinger() {
-        if (!this.animal.hasData(HungerAttachments.GRAZE_PATCH) && this.isPatchLeader()) {
+        if (!this.animal.hasData(ModAttachments.GRAZE_PATCH) && this.isPatchLeader()) {
             this.finished = true;
             return;
         }
@@ -864,11 +870,17 @@ extends MoveToBlockGoal {
             this.finished = true;
             return;
         }
-        BlockPos patch = this.isPatchLeader() && this.animal.hasData(HungerAttachments.GRAZE_PATCH) ? ((GrazePatchData)this.animal.getData(HungerAttachments.GRAZE_PATCH)).center() : this.blockPos;
-        double distSqr = this.animal.distanceToSqr(Vec3.atCenterOf((Vec3i)patch));
+        BlockPos patch = this.isPatchLeader() && this.animal.hasData(ModAttachments.GRAZE_PATCH) ? ((GrazePatchData)this.animal.getData(ModAttachments.GRAZE_PATCH)).center() : this.blockPos;
+        double distSqr = this.animal.distanceToSqr(Vec3.atCenterOf(patch));
         if (distSqr > 9.0) {
             if (this.mob.getNavigation().isDone()) {
-                this.mob.getNavigation().moveTo((double)patch.getX() + 0.5, (double)patch.getY(), (double)patch.getZ() + 0.5, this.speedModifier);
+                BlockPos anchored = Homes.surfaceStandForMove(this.mob.level(), patch, this.mob);
+                if (anchored == null) {
+                    anchored = Homes.offsetStandFromCorners(this.mob.level(), patch);
+                } else {
+                    anchored = Homes.offsetStandFromCorners(this.mob.level(), anchored);
+                }
+                this.mob.getNavigation().moveTo((double)anchored.getX() + 0.5, (double)anchored.getY(), (double)anchored.getZ() + 0.5, this.speedModifier);
             }
             if (++this.tryTicks > 600) {
                 if (this.isPatchLeader()) {
@@ -944,8 +956,9 @@ extends MoveToBlockGoal {
             sheep.ate();
         }
         float multiplier = SpeciesHungerSettings.isCropFood(state.getBlock()) ? settings.cropMultiplier() : 1.0f;
-        int before = Hunger.getHunger((Entity)this.animal);
-        Hunger.feed((Entity)this.animal, EatFoodGoal.scaledFeed(settings, multiplier));
+        int before = Hunger.getHunger(this.animal);
+        Hunger.feed(this.animal, EatFoodGoal.scaledFeed(settings, multiplier));
+        Hunger.beginEatAnim(this.animal);
         this.animal.heal(settings.healPerFood());
         this.failedSearches = 0;
         this.foragingFar = false;
@@ -968,7 +981,8 @@ extends MoveToBlockGoal {
             level.broadcastEntityEvent((Entity)sheep, (byte)10);
             sheep.ate();
         }
-        Hunger.feed((Entity)this.animal, EatFoodGoal.scaledFeed(settings, settings.feederMultiplier()));
+        Hunger.feed(this.animal, EatFoodGoal.scaledFeed(settings, settings.feederMultiplier()));
+        Hunger.beginEatAnim(this.animal);
         this.animal.heal(settings.healPerFood());
         this.failedSearches = 0;
         this.foragingFar = false;
@@ -983,19 +997,13 @@ extends MoveToBlockGoal {
     }
 
     private SoundEvent eatSound() {
-        if (this.animal instanceof Sheep) {
-            return ModSounds.SHEEP_EAT.get();
-        }
-        if (this.animal instanceof Cow) {
-            return ModSounds.COW_EAT.get();
-        }
-        if (this.animal instanceof Pig) {
-            return ModSounds.PIG_EAT.get();
-        }
-        if (this.animal instanceof Chicken) {
-            return ModSounds.CHICKEN_EAT.get();
-        }
-        return SoundEvents.GENERIC_EAT;
+        return switch (this.animal) {
+            case Sheep sheep -> ModSounds.SHEEP_EAT.get();
+            case Cow cow -> ModSounds.COW_EAT.get();
+            case Pig pig -> ModSounds.PIG_EAT.get();
+            case Chicken chicken -> ModSounds.CHICKEN_EAT.get();
+            default -> SoundEvents.GENERIC_EAT;
+        };
     }
 
     private boolean tryClaimSeedTarget() {
@@ -1011,6 +1019,10 @@ extends MoveToBlockGoal {
         double bestDist = 8.0 * 8.0;
         AABB box = this.animal.getBoundingBox().inflate(8.0, 3.0, 8.0);
         for (ItemEntity item : this.animal.level().getEntitiesOfClass(ItemEntity.class, box, EatFoodGoal::isPeckableSeed)) {
+            // Seeds dropped across the fence are not food for a penned bird.
+            if (FenceDetection.excludes(this.animal.level(), this.penRegion, item.blockPosition(), this.penRefY)) {
+                continue;
+            }
             double dist = this.animal.distanceToSqr(item);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -1071,7 +1083,8 @@ extends MoveToBlockGoal {
         }
         Level level = this.animal.level();
         level.playSound(null, this.animal.blockPosition(), this.eatSound(), SoundSource.NEUTRAL, 1.0f, 1.0f);
-        Hunger.feed((Entity)this.animal, EatFoodGoal.scaledFeed(settings, 1.0f));
+        Hunger.feed(this.animal, EatFoodGoal.scaledFeed(settings, 1.0f));
+        Hunger.beginEatAnim(this.animal);
         this.animal.heal(settings.healPerFood());
         this.failedSearches = 0;
         this.foragingFar = false;

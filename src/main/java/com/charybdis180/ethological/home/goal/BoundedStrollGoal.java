@@ -1,7 +1,7 @@
 package com.charybdis180.ethological.home.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.CliffAvoidance;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.home.HomeSettingsManager;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.home.SpeciesHomeSettings;
@@ -32,7 +32,7 @@ public class BoundedStrollGoal extends RandomStrollGoal {
     public boolean canUse() {
         // Babies with a recorded mother follow her instead of wandering (both this
         // and FollowParentGoal sit at priority 6 and would fight over MOVE).
-        if (this.animal.isBaby() && this.animal.hasData(HerdAttachments.MOTHER)) {
+        if (this.animal.isBaby() && this.animal.hasData(ModAttachments.MOTHER)) {
             return false;
         }
         Optional<SpeciesSleepSettings> sleepSettings = SleepSettingsManager.get(this.animal.getType());
@@ -89,6 +89,9 @@ public class BoundedStrollGoal extends RandomStrollGoal {
             }
             if (!CliffAvoidance.isEdgeSafe(this.animal.level(), BlockPos.containing(candidate))) {
                 continue; // never target a cliff lip for an idle wander
+            }
+            if (!Homes.isDryLand(this.animal.level(), BlockPos.containing(candidate))) {
+                continue; // idle animals do not walk into water
             }
             if (raining) {
                 BlockPos stand = BlockPos.containing(candidate);

@@ -1,11 +1,9 @@
 package com.charybdis180.ethological.avoidance;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.config.EthologicalConfig;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.MotherData;
-import com.charybdis180.ethological.sleep.SleepAttachments;
-import com.charybdis180.ethological.social.SocialAttachments;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -133,21 +131,21 @@ public final class CrowdYield {
      * skipped so multiple movers cannot overwrite the blocker's request.
      */
     private static boolean isYieldableBlocker(Animal other, long now) {
-        if (other.getData(SleepAttachments.SLEEPING).booleanValue()
-                || other.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (other.getData(ModAttachments.SLEEPING).booleanValue()
+                || other.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         if (HerdManager.panicPhaseOf(other, now) != HerdManager.PanicPhase.NONE) {
             return false;
         }
-        if (other.hasData(SocialAttachments.PLAY) || other.hasData(SocialAttachments.STARTLE)) {
+        if (other.hasData(ModAttachments.PLAY) || other.hasData(ModAttachments.STARTLE)) {
             return false;
         }
         if (!other.getNavigation().isDone()) {
             return false;
         }
-        if (other.isBaby() && other.hasData(HerdAttachments.MOTHER)
-                && ((MotherData)other.getData(HerdAttachments.MOTHER)).isActive(now)) {
+        if (other.isBaby() && other.hasData(ModAttachments.MOTHER)
+                && ((MotherData)other.getData(ModAttachments.MOTHER)).isActive(now)) {
             return false;
         }
         return !hasActiveRequest(other, now);

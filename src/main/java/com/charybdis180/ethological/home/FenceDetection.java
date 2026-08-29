@@ -1,21 +1,10 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.tags.BlockTags
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.block.FenceGateBlock
- *  net.minecraft.world.level.block.state.BlockState
- *  net.minecraft.world.level.block.state.properties.Property
- */
 package com.charybdis180.ethological.home;
 
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
@@ -209,8 +198,129 @@ public final class FenceDetection {
         return enclosed;
     }
 
-    public static boolean canRejoin(Level level, BlockPos from, BlockPos to, int radius) {
-        int refY = from.getY();
+    /**
+     * The animal's reachable flood region (the pen interior it stands in), reusing the
+     * same cached flood as {@link #isFencedIn}. Callers gather pen-mates by testing
+     * membership against this region instead of flooding per animal.
+     */
+    public static LongSet regionOf(Animal animal) {
+        BlockPos origin = animal.blockPosition();
+        return FenceDetection.reachableColumns(animal.level(), origin.getX(), origin.getZ(), origin.getY(), ESCAPE_RADIUS);
+    }
+
+    /**
+     * Memoized pen-interior resolver for need-goal gating: returns the flood region of
+     * the enclosure the animal stands in ONLY when {@link #isFencedIn} confirms the
+     * enclosure is real (fence-walled AND escape-proof); null when the animal roams free.
+     * isFencedIn's verdict and the flood are both TTL-cached and shared by position, so a
+     * whole pen of animals pays one BFS + one escape probe per refresh window — each
+     * member's own memo below just avoids re-deriving the answer between those windows.
+     */
+    public static LongSet pennedRegionOf(Animal animal) {
+        long now = animal.level().getGameTime();
+        PenMemo memo = PEN_MEMO.get(animal.getUUID());
+        if (memo != null && now - memo.stamp() < PEN_MEMO_TTL_TICKS) {
+            return memo.region();
+        }
+        boolean fenced = FenceDetection.isFencedIn(animal);
+        LongSet region = null;
+        if (fenced && animal.level() instanceof ServerLevel) {
+            region = FenceDetection.regionOf(animal);
+        }
+        if (PEN_MEMO.size() >= PEN_MEMO_MAX) {
+            PEN_MEMO.clear();
+        }
+        PEN_MEMO.put(animal.getUUID(), new PenMemo(now, region));
+        return region;
+    }
+
+    /**
+     * Most open floor column of the animal's pen: the flood-region column with the largest
+     * clear-air clearance above it, ties broken by distance to the region's centroid. The
+     * arithmetic centroid misplaces the "middle" of lopsided pens (mean lands in a thin arm
+     * or against a wall); the widest-open spot is the natural huddle center everywhere.
+     * Returns null when the animal roams free. Pure pass over the memoized region — the
+     * clearance probe is memoized by isCliffSafe's cache, so no extra world scans.
+     */
+    public static BlockPos penMostOpenColumnOf(Animal animal) {
+        LongSet region = FenceDetection.pennedRegionOf(animal);
+        if (region == null || region.isEmpty()) {
+            return null;
+        }
+        long sumX = 0L;
+        long sumZ = 0L;
+        for (it.unimi.dsi.fastutil.longs.LongIterator it = region.iterator(); it.hasNext(); ) {
+            long packed = it.nextLong();
+            sumX += packed >> 32;
+            sumZ += (int)packed;
+        }
+        final int cx = (int)(sumX / region.size());
+        final int cz = (int)(sumZ / region.size());
+        BlockPos best = null;
+        int bestClearance = Integer.MIN_VALUE;
+        double bestDistSqr = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (it.unimi.dsi.fastutil.longs.LongIterator it = region.iterator(); it.hasNext(); ) {
+            long packed = it.nextLong();
+            int x = (int)(packed >> 32);
+            int z = (int)packed;
+            cursor.set(x, animal.blockPosition().getY(), z);
+            if (!Homes.isDryLand(animal.level(), cursor)) {
+                continue;
+            }
+            // A floor column that shears (an actual drop just inside the pick, or a sheer
+            // drop around the pick) would break the huddle body across the cliff edge. The
+            // flatness probe uses the FEET column, before the move-up below.
+            int footY = Homes.flatnessDropStats(animal.level(), cursor, CLIFF_RADIUS, null, null);
+            int floorMaxDrop = Homes.flatnessDropStats(animal.level(), cursor, HERD_FOOTPRINT, null, null);
+            if (floorMaxDrop == Integer.MAX_VALUE
+                    || (footY != Integer.MIN_VALUE && footY < cursor.getY() - 2)) {
+                continue;
+            }
+            // Count contiguous air above the stand, capped at 5 — enough to rank openness.
+            int clearance = 0;
+            cursor.move(Direction.UP);
+            while (clearance < 5
+                    && Homes.isDryLand(animal.level(), cursor)
+                    && !animal.level().getBlockState(cursor).blocksMotion()) {
+                ++clearance;
+                cursor.move(Direction.UP);
+            }
+            double distSqr = (double)(x - cx) * (x - cx) + (double)(z - cz) * (z - cz);
+            if (clearance > bestClearance
+                    || clearance == bestClearance && distSqr < bestDistSqr) {
+                bestClearance = clearance;
+                bestDistSqr = distSqr;
+                best = new BlockPos(x, animal.blockPosition().getY(), z);
+            }
+        }
+        return best;
+    }
+
+    /** How large a huddle footprint the flatness probes cover (radius). */
+    private static final int HERD_FOOTPRINT = 3;
+    /** How far the sheer-slope probe reaches around a huddle column. */
+    private static final int CLIFF_RADIUS = 2;
+
+    private record PenMemo(long stamp, LongSet region) {
+    }
+
+    /** Per-animal pen memo TTL; comfortably inside the shared flood/escape cache windows. */
+    private static final long PEN_MEMO_TTL_TICKS = 40L;
+    private static final int PEN_MEMO_MAX = 2048;
+    private static final java.util.Map<java.util.UUID, PenMemo> PEN_MEMO = new java.util.HashMap<>();
+
+    /**
+     * Membership test for a candidate target against a pen interior. The flood region was
+     * built from passable columns at the animal's own level, so "in region" already means
+     * "walkable ground inside this pen" — anything else is outside the fence. Callers must
+     * treat a null region as "no restriction".
+     */
+    public static boolean excludes(Level level, LongSet region, BlockPos pos, int refY) {
+        return region != null && !region.contains(FenceDetection.pack(pos.getX(), pos.getZ()));
+    }
+
+    public static boolean canRejoin(Level level, BlockPos from, BlockPos to, int radius) {        int refY = from.getY();
         BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
         if (FenceDetection.columnBlocksPassage(level, from.getX(), from.getZ(), refY, probe) || FenceDetection.columnBlocksPassage(level, to.getX(), to.getZ(), refY, probe)) {
             return false;

@@ -1,37 +1,11 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.core.particles.ParticleOptions
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.server.packs.resources.PreparableReloadListener
- *  net.minecraft.util.Mth
- *  net.minecraft.world.effect.MobEffectInstance
- *  net.minecraft.world.effect.MobEffects
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.MoverType
- *  net.minecraft.world.entity.ai.attributes.Attributes
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.Vec3
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.AddReloadListenerEvent
- *  net.neoforged.neoforge.event.entity.EntityJoinLevelEvent
- *  net.neoforged.neoforge.event.entity.living.LivingDamageEvent$Pre
- *  net.neoforged.neoforge.event.tick.EntityTickEvent$Post
- */
 package com.charybdis180.ethological.sleep;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.ModParticles;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.goal.FollowPathing;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepDisturbance;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
@@ -41,6 +15,7 @@ import com.charybdis180.ethological.sleep.goal.SettleForSleepGoal;
 import com.charybdis180.ethological.social.Familiarity;
 import com.charybdis180.ethological.thirst.Thirst;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.particles.ParticleOptions;
@@ -93,7 +68,7 @@ public final class SleepEvents {
 
     @SubscribeEvent
     public static void onAddReloadListeners(AddReloadListenerEvent event) {
-        event.addListener((PreparableReloadListener)new SleepSettingsManager());
+        event.addListener(new SleepSettingsManager());
     }
 
     @SubscribeEvent
@@ -109,7 +84,7 @@ public final class SleepEvents {
         if (SleepSettingsManager.get(animal.getType()).isEmpty()) {
             return;
         }
-        if (((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        if (animal.getData(ModAttachments.SLEEPING)) {
             animal.setSilent(true);
         }
         animal.goalSelector.addGoal(1, (Goal)new AsleepGoal(animal));
@@ -132,31 +107,35 @@ public final class SleepEvents {
             return;
         }
         ServerLevel serverLevel = (ServerLevel)level;
+        // Trail animals transiting water: a transient MOVEMENT_SPEED boost while actively
+        // pathing keeps them from flop-drifting and gives them momentum to hop onto shore.
+        // Runs for every animal (even species without sleep settings) before the settings gate.
+        com.charybdis180.ethological.util.SwimAssist.update(animal);
         long now = animal.level().getGameTime();
         // Expire disturbance unconditionally (even for species without sleep settings).
-        if (animal.hasData(SleepAttachments.SLEEP_DISTURBANCE) && ((threat = serverLevel.getEntity((disturbance = (SleepDisturbance)animal.getData(SleepAttachments.SLEEP_DISTURBANCE)).threatId())) == null || !threat.isAlive() || now - disturbance.disturbedGameTime() > 1200L)) {
-            animal.removeData(SleepAttachments.SLEEP_DISTURBANCE);
+        if (animal.hasData(ModAttachments.SLEEP_DISTURBANCE) && ((threat = serverLevel.getEntity((disturbance = (SleepDisturbance)animal.getData(ModAttachments.SLEEP_DISTURBANCE)).threatId())) == null || !threat.isAlive() || now - disturbance.disturbedGameTime() > 1200L)) {
+            animal.removeData(ModAttachments.SLEEP_DISTURBANCE);
             if (SleepSettingsManager.get(animal.getType()).isPresent()) {
-                animal.setData(SleepAttachments.SLEEP_VIGILANCE,(now + 120L));
+                animal.setData(ModAttachments.SLEEP_VIGILANCE,(now + 120L));
             }
         }
         Optional<SpeciesSleepSettings> settingsOpt = SleepSettingsManager.get(animal.getType());
         if (settingsOpt.isEmpty()) {
             // Unsupported species: don't create or mutate any other sleep attachments.
-            if (animal.hasData(SleepAttachments.SLEEPING) && ((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+            if (animal.hasData(ModAttachments.SLEEPING) && animal.getData(ModAttachments.SLEEPING)) {
                 SleepEvents.wake(animal);
             }
             return;
         }
-        boolean sleeping = (Boolean)animal.getData(SleepAttachments.SLEEPING);
+        boolean sleeping = (Boolean)animal.getData(ModAttachments.SLEEPING);
         // setSilent writes NBT on every call; skip when the flag already matches so a
         // waking herd stops paying the sync cost each tick.
         if (animal.isSilent() != sleeping) {
             animal.setSilent(sleeping);
         }
         SpeciesSleepSettings settings = settingsOpt.get();
-        boolean disturbed = animal.hasData(SleepAttachments.SLEEP_DISTURBANCE);
-        boolean vigilant = now < (Long)animal.getData(SleepAttachments.SLEEP_VIGILANCE);
+        boolean disturbed = animal.hasData(ModAttachments.SLEEP_DISTURBANCE);
+        boolean vigilant = now < (Long)animal.getData(ModAttachments.SLEEP_VIGILANCE);
         // Proximity-woken animals stay alert while a player loiters nearby. The player scan
         // and the sleep transition are the awake-animal body — gated to ~every 10 ticks so a
         // large herd standing around does not re-scan players and re-evaluate bedtime each tick.
@@ -170,17 +149,33 @@ public final class SleepEvents {
         boolean inWater = animal.isInWaterOrBubble();
         long dayTime = animal.level().getDayTime();
         boolean pastBedtime = settings.isSleepTime(dayTime) && Homes.ticksIntoSleepWindow(dayTime, settings) >= SleepEvents.bedtimeDelay(animal, settings);
+        // A waterline cell (feet dry, body overhanging the pond) passes the in-water test
+        // but is exactly the "sitting in the water trying to sleep" state — require a
+        // proper dry bed for both staying asleep and falling asleep. Only evaluated for
+        // animals that could sleep or are sleeping; daytime animals skip the block reads.
+        boolean dryBed = !sleeping && !pastBedtime || Homes.isDryBed(level, animal.blockPosition());
         boolean bl = herdCalm = HerdManager.panicPhaseOf(animal, now) == HerdManager.PanicPhase.NONE;
         if (sleeping) {
             // A herd member whose alpha has wandered out of its sleep-proximity radius must
             // wake and rejoin, otherwise a member that fell asleep in range stays asleep far
             // from the herd (the entry gate blocks NEW sleeps out of range but never wakes
             // one already asleep). distanceToAlpha is -1 for un-herded animals, which never
-            // triggers this.
+            // triggers this. herdRestRadius matches the entry gate below (strict radius while
+            // the alpha is up, relaxed 2x while it is down), so a member that legitimately
+            // settled beside a resting alpha is not woken by its own gate.
             double _sleepAlphaDist = FollowPathing.distanceToAlpha(animal);
-            boolean alphaOutOfRange = _sleepAlphaDist >= 0.0 && _sleepAlphaDist > FollowPathing.sleepRadius(animal);
-            boolean emergencyWake = disturbed || vigilant || hungry || thirsty || inWater || !herdCalm || alphaOutOfRange;
+            boolean alphaOutOfRange = _sleepAlphaDist >= 0.0 && _sleepAlphaDist > FollowPathing.herdRestRadius(animal);
+            boolean emergencyWake = disturbed || vigilant || hungry || thirsty || inWater || !dryBed || !herdCalm || alphaOutOfRange;
             if (emergencyWake) {
+                // Any animal that cannot safely sleep where it stands (mid-swim, or on a
+                // waterline cell whose feet are dry but body overhangs the pond) wakes; the
+                // shore walk is SeekShoreGoal's job, not the event's. A bare wake() leaves
+                // the animal standing in the water for a tick, then SeekShoreGoal — which
+                // itself wakes a sleeping swimmer and owns MOVE until dry — carries it to
+                // the bank, and the normal bedtime gate settles it back down on arrival.
+                // Crucially, do NOT set SLEEP_DISTURBANCE here: FleeThreatGoal outranks
+                // SeekShoreGoal and the animal would "flee" toward a random point instead
+                // of the shore, and SeekShoreGoal itself gates on this attachment.
                 SleepEvents.wake(animal);
             } else if (!pastBedtime) {
                 // Sleep window has ended — this is the natural morning wake. Stagger it per-UUID
@@ -198,32 +193,43 @@ public final class SleepEvents {
                 SleepEvents.returnToSleepPosition(animal, settings);
             }
         } else if (com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "sleep_awake", now, 10L)
-                && pastBedtime && !disturbed && !vigilant && !hungry && !thirsty && !inWater && herdCalm) {
+                && pastBedtime && !disturbed && !vigilant && !hungry && !thirsty && !inWater && dryBed && herdCalm) {
+            // A live WATER_TARGET means the drink goal holds MOVE and is mid-trek or mid-bout
+            // (its sips have already lifted thirst past the urgent threshold above). Sleeping
+            // now would steal the goal mid-drink and strand the member away from the herd —
+            // the target clears in DrinkWaterGoal.stop() and bedtime is re-checked then, so
+            // the member falls asleep the moment it finishes drinking near its spot.
+            boolean drinkTrek = animal.hasData(com.charybdis180.ethological.registry.ModAttachments.WATER_TARGET);
+            // herdRestRadius (not sleepRadius) matches FollowAlphaGoal's alpha-down settle
+            // circle: a member parked at 1.5x follow beside its sleeping alpha is "arrived"
+            // for follow purposes and must be allowed to sleep there too, or it strands in
+            // the dead zone between the two radii — standing awake as follow_alpha/vigilant
+            // all night.
             double _alphaDist = FollowPathing.distanceToAlpha(animal);
-            double _sleepR = FollowPathing.sleepRadius(animal);
-            if (_alphaDist <= _sleepR) {
-                animal.setData(SleepAttachments.SLEEP_YAW,Float.valueOf(animal.yBodyRot));
-                animal.setData(SleepAttachments.SLEEP_POS,animal.blockPosition());
+            double _sleepR = FollowPathing.herdRestRadius(animal);
+            if (!drinkTrek && _alphaDist <= _sleepR) {
+                animal.setData(ModAttachments.SLEEP_YAW,Float.valueOf(animal.yBodyRot));
+                animal.setData(ModAttachments.SLEEP_POS,animal.blockPosition());
                 animal.getNavigation().stop();
                 animal.setSilent(true);
-                animal.setData(SleepAttachments.SLEEPING,true);
+                animal.setData(ModAttachments.SLEEPING,true);
             } else {
             }
         }
-        sleeping = (Boolean)animal.getData(SleepAttachments.SLEEPING);
+        sleeping = (Boolean)animal.getData(ModAttachments.SLEEPING);
         if (sleeping) {
             long proximityInterval = (long)PROXIMITY_WAKE_INTERVAL_MIN
                     + com.charybdis180.ethological.util.Personality.memoizedSalt(animal.getUUID(), "prox_wake_iv", PROXIMITY_WAKE_INTERVAL_SPAN);
             if (com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "prox_wake", now, proximityInterval)) {
                 SleepEvents.checkProximityWake(animal, serverLevel, now);
-                sleeping = (Boolean)animal.getData(SleepAttachments.SLEEPING);
+                sleeping = (Boolean)animal.getData(ModAttachments.SLEEPING);
             }
         }
         if (sleeping
                 && serverLevel.isThundering()
                 && com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "thunder_wake", now, 40L)) {
             SleepEvents.wake(animal);
-            animal.setData(SleepAttachments.SLEEP_VIGILANCE, now + THUNDER_WAKE_VIGILANCE_TICKS);
+            animal.setData(ModAttachments.SLEEP_VIGILANCE, now + THUNDER_WAKE_VIGILANCE_TICKS);
             sleeping = false;
         }
         if (sleeping
@@ -272,7 +278,7 @@ public final class SleepEvents {
                 continue;
             }
             SleepEvents.wake(animal);
-            animal.setData(SleepAttachments.SLEEP_VIGILANCE, now + HOSTILE_WAKE_VIGILANCE_TICKS);
+            animal.setData(ModAttachments.SLEEP_VIGILANCE, now + HOSTILE_WAKE_VIGILANCE_TICKS);
             return true;
         }
         return false;
@@ -317,7 +323,7 @@ public final class SleepEvents {
     private static void wakeSleepersNearBlock(ServerLevel level, BlockPos pos, Player player) {
         long now = level.getGameTime();
         AABB box = new AABB(pos).inflate(BLOCK_WAKE_DISTANCE);
-        for (Animal animal : level.getEntitiesOfClass(Animal.class, box, a -> ((Boolean)a.getData(SleepAttachments.SLEEPING)).booleanValue() && SleepSettingsManager.get(a.getType()).isPresent())) {
+        for (Animal animal : level.getEntitiesOfClass(Animal.class, box, a -> a.getData(ModAttachments.SLEEPING) && SleepSettingsManager.get(a.getType()).isPresent())) {
             SleepEvents.wakeNearPlayer(animal, player, now);
         }
     }
@@ -329,7 +335,7 @@ public final class SleepEvents {
         // Vigilance keeps them briefly alert; do not set SLEEP_DISTURBANCE — that is
         // reserved for attacks and is what drives FleeThreatGoal. While a player stays
         // within STAY_AWAKE_DISTANCE, tick refresh extends this vigilance.
-        animal.setData(SleepAttachments.SLEEP_VIGILANCE, (now + vigilance));
+        animal.setData(ModAttachments.SLEEP_VIGILANCE, (now + vigilance));
     }
 
     private static double levelPlayersBox(Animal animal) {
@@ -362,7 +368,7 @@ public final class SleepEvents {
             if (player.distanceToSqr((Entity)animal) > STAY_AWAKE_DISTANCE_SQR) {
                 continue;
             }
-            animal.setData(SleepAttachments.SLEEP_VIGILANCE, now + PROXIMITY_WAKE_VIGILANCE_TICKS);
+            animal.setData(ModAttachments.SLEEP_VIGILANCE, now + PROXIMITY_WAKE_VIGILANCE_TICKS);
             return true;
         }
         return false;
@@ -372,12 +378,12 @@ public final class SleepEvents {
         if (!com.charybdis180.ethological.util.Personality.tickGate(animal.getUUID(), "sleep_z", now, 160L)) {
             return;
         }
-        float yawRad = ((Float)animal.getData(SleepAttachments.SLEEP_YAW)).floatValue() * ((float)Math.PI / 180);
+        float yawRad = ((Float)animal.getData(ModAttachments.SLEEP_YAW)).floatValue() * ((float)Math.PI / 180);
         double faceDist = (double)animal.getBbWidth() * 0.55 + 0.5;
         double faceY = 0.45;
         double ox = (double)(-Mth.sin((float)yawRad)) * faceDist;
         double oz = (double)Mth.cos((float)yawRad) * faceDist;
-        level.sendParticles((ParticleOptions)ModParticles.Z.get(), animal.getX() + ox, animal.getY() + faceY, animal.getZ() + oz, 1, 0.0, 0.02, 0.0, 0.0);
+        level.sendParticles(ModParticles.Z.get(), animal.getX() + ox, animal.getY() + faceY, animal.getZ() + oz, 1, 0.0, 0.02, 0.0, 0.0);
     }
 
     @SubscribeEvent
@@ -395,9 +401,9 @@ public final class SleepEvents {
         }
         Entity attacker = event.getSource().getEntity();
         if (attacker != null && attacker != animal) {
-            animal.setData(SleepAttachments.SLEEP_DISTURBANCE,new SleepDisturbance(attacker.getUUID(), animal.level().getGameTime()));
+            animal.setData(ModAttachments.SLEEP_DISTURBANCE,new SleepDisturbance(attacker.getUUID(), animal.level().getGameTime()));
         }
-        if (((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        if (animal.getData(ModAttachments.SLEEPING)) {
             SleepEvents.wake(animal);
         }
     }
@@ -415,26 +421,48 @@ public final class SleepEvents {
 
     private static void returnToSleepPosition(Animal animal, SpeciesSleepSettings settings) {
         double maxDist;
-        BlockPos sleepPos = (BlockPos)animal.getData(SleepAttachments.SLEEP_POS);
+        BlockPos sleepPos = (BlockPos)animal.getData(ModAttachments.SLEEP_POS);
         if (sleepPos.equals(BlockPos.ZERO)) {
             return;
         }
-        double distSqr = animal.distanceToSqr(Vec3.atCenterOf((Vec3i)sleepPos));
+        double distSqr = animal.distanceToSqr(Vec3.atCenterOf(sleepPos));
         if (distSqr <= (maxDist = (double)settings.sleepReturnRadius()) * maxDist) {
             return;
         }
         // Pushed too far from the sleeping spot: wake up and walk instead of gliding in the sleep pose.
         SleepEvents.wake(animal);
-        animal.setData(SleepAttachments.SLEEP_VIGILANCE,(animal.level().getGameTime() + 60L));
+        animal.setData(ModAttachments.SLEEP_VIGILANCE,(animal.level().getGameTime() + 60L));
+    }
+
+    /** Dry, unoccupied sleep stand near the herd's alpha (or the animal itself when it has
+     *  no herd), for guiding a beached/swimming member back to the huddle. */
+    public static BlockPos drySleepSpotNearHerd(Animal animal) {
+        Level level = animal.level();
+        BlockPos here = animal.blockPosition();
+        HerdManager.Herd herd = HerdManager.herdOf(animal);
+        BlockPos center = here;
+        if (herd != null && herd.alphaId != null && level instanceof ServerLevel serverLevel) {
+            Entity alphaEntity = serverLevel.getEntity(herd.alphaId);
+            if (alphaEntity instanceof Animal alpha && alpha.isAlive()) {
+                center = alpha.blockPosition();
+            }
+        }
+        Set<BlockPos> occupied = new java.util.HashSet<BlockPos>();
+        if (herd != null) {
+            occupied.addAll(herd.sleepSpotClaimsOf(animal, level.getGameTime()));
+        }
+        int spacing = (Integer)com.charybdis180.ethological.config.EthologicalConfig.CONFIG.comfort.sleepSpotSpacing.get();
+        return Homes.findUnoccupiedStand(level, center, 6, occupied, spacing)
+                .orElseGet(() -> Homes.findUnoccupiedStand(level, here, 4, occupied, spacing).orElse(null));
     }
 
     public static void wake(Animal animal) {
         animal.getNavigation().stop();
         animal.setSilent(false);
-        animal.setData(SleepAttachments.SLEEPING,false);
-        animal.removeData(SleepAttachments.SLEEP_YAW);
-        animal.removeData(SleepAttachments.SLEEP_POS);
-        animal.removeData(SleepAttachments.SLEEP_TARGET);
+        animal.setData(ModAttachments.SLEEPING,false);
+        animal.removeData(ModAttachments.SLEEP_YAW);
+        animal.removeData(ModAttachments.SLEEP_POS);
+        animal.removeData(ModAttachments.SLEEP_TARGET);
     }
 }
 

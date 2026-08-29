@@ -1,31 +1,11 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Position
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LightningBolt
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.phys.AABB
- *  net.minecraft.world.phys.Vec3
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.entity.EntityJoinLevelEvent
- *  net.neoforged.neoforge.event.entity.ProjectileImpactEvent
- *  net.neoforged.neoforge.event.level.ExplosionEvent$Detonate
- */
 package com.charybdis180.ethological.social;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepEvents;
 import com.charybdis180.ethological.social.Familiarity;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.social.StartleData;
 import com.charybdis180.ethological.social.goal.CuriousGoal;
 import com.charybdis180.ethological.social.goal.PlayGoal;
@@ -120,28 +100,28 @@ public final class SocialEvents {
     private static void applyStartle(Animal animal, BlockPos from, long now, long startleTicks) {
         long scaled = Familiarity.scaleStartleTicks(animal, startleTicks);
         long until = now + scaled;
-        if (animal.hasData(SocialAttachments.STARTLE)) {
-            StartleData existing = (StartleData)animal.getData(SocialAttachments.STARTLE);
+        if (animal.hasData(ModAttachments.STARTLE)) {
+            StartleData existing = (StartleData)animal.getData(ModAttachments.STARTLE);
             if (existing.untilGameTime() >= until) {
                 return;
             }
         }
-        animal.setData(SocialAttachments.STARTLE, new StartleData(from, until));
-        animal.setData(SleepAttachments.SLEEP_VIGILANCE, (now + STARTLE_VIGILANCE_TICKS));
-        if (((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        animal.setData(ModAttachments.STARTLE, new StartleData(from, until));
+        animal.setData(ModAttachments.SLEEP_VIGILANCE, (now + STARTLE_VIGILANCE_TICKS));
+        if (animal.getData(ModAttachments.SLEEPING)) {
             SleepEvents.wake(animal);
         }
     }
 
     private static void startleHerdMates(Animal source, BlockPos from, long now, long mateTicks) {
-        if (!source.hasData(HerdAttachments.HERD_DATA)) {
+        if (!source.hasData(ModAttachments.HERD_DATA)) {
             return;
         }
         Level level = source.level();
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
-        HerdManager.Herd herd = HerdManager.get(((HerdData)source.getData(HerdAttachments.HERD_DATA)).herdId());
+        HerdManager.Herd herd = HerdManager.get(((HerdData)source.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return;
         }

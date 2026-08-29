@@ -1,18 +1,8 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.model.PigModel
- *  net.minecraft.client.model.geom.ModelPart
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Pig
- */
 package com.charybdis180.ethological.client.sleep;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.client.HeadDip;
 import com.charybdis180.ethological.client.sleep.SleepPose;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import net.minecraft.client.model.PigModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.world.entity.LivingEntity;
@@ -51,9 +41,9 @@ extends PigModel<Pig> {
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
         ModelPart head = this.parts.head();
         ModelPart body = this.parts.body();
-        boolean sleeping = (Boolean)entity.getData(SleepAttachments.SLEEPING);
-        boolean resting = (Boolean)entity.getData(SleepAttachments.RESTING);
-        if (sleeping || resting) {
+        boolean sleeping = (Boolean)entity.getData(ModAttachments.SLEEPING);
+        boolean resting = (Boolean)entity.getData(ModAttachments.RESTING);
+        if ((sleeping || resting) && SleepPose.lieDownModelsEnabled()) {
             SleepPose.apply(this.parts, 15.0f, SleepPose.headY(18.5f, entity.isBaby()), this.defaultFrontLegZ, this.defaultHindLegZ, this.defaultRightFrontX, this.defaultLeftFrontX, this.defaultRightHindX, this.defaultLeftHindX, 0.5f, 1.0f, resting, this.defaultBodyY, this.defaultHeadY);
             if (sleeping) {
                 head.z = -5.0f;

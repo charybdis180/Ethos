@@ -1,46 +1,15 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.blaze3d.vertex.PoseStack
- *  net.minecraft.client.Minecraft
- *  net.minecraft.client.gui.Font
- *  net.minecraft.client.gui.Font$DisplayMode
- *  net.minecraft.client.gui.GuiGraphics
- *  net.minecraft.client.renderer.entity.EntityRenderDispatcher
- *  net.minecraft.core.Vec3i
- *  net.minecraft.network.chat.Component
- *  net.minecraft.network.chat.FormattedText
- *  net.minecraft.network.chat.MutableComponent
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.entity.animal.Sheep
- *  net.minecraft.world.item.Items
- *  net.minecraft.world.phys.Vec3
- *  net.neoforged.api.distmarker.Dist
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.fml.common.EventBusSubscriber
- *  net.neoforged.neoforge.client.event.RenderGuiEvent$Post
- *  net.neoforged.neoforge.client.event.RenderLivingEvent$Post
- *  org.joml.Matrix4f
- */
 package com.charybdis180.ethological.client;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.debug.ActiveBehavior;
-import com.charybdis180.ethological.debug.DebugAttachments;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.MotherData;
 import com.charybdis180.ethological.home.HomeData;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.hunger.HungerAttachments;
 import com.charybdis180.ethological.hunger.HungerData;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.thirst.Thirst;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
 import com.charybdis180.ethological.thirst.ThirstData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.Optional;
@@ -78,7 +47,7 @@ public final class HungerDebugRendering {
     @SubscribeEvent
     public static void onRenderLivingPost(RenderLivingEvent.Post<?, ?> event) {
         LivingEntity entity = event.getEntity();
-        if (!entity.hasData(HungerAttachments.HUNGER_DATA)) {
+        if (!entity.hasData(ModAttachments.HUNGER_DATA)) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -110,7 +79,7 @@ public final class HungerDebugRendering {
             return;
         }
         LivingEntity living = (LivingEntity)entity;
-        if (!living.hasData(HungerAttachments.HUNGER_DATA)) {
+        if (!living.hasData(ModAttachments.HUNGER_DATA)) {
             return;
         }
         HungerData data = Hunger.data((Entity)living);
@@ -126,12 +95,12 @@ public final class HungerDebugRendering {
         int green = (int)(255.0f * pct);
         graphics.fill(x, y, x + (int)((float)barWidth * pct), y + barHeight, 0xFF000000 | red << 16 | green << 8);
         String label = (int)(pct * 100.0f) + "%";
-        if (((Boolean)living.getData(SleepAttachments.SLEEPING)).booleanValue()) {
+        if (living.getData(ModAttachments.SLEEPING)) {
             label = label + " (sleeping)";
         }
         graphics.drawString(mc.font, label, x + barWidth + 4, y - 1, -1, true);
         int nextY = y + barHeight + 4;
-        if (living.hasData(ThirstAttachments.THIRST_DATA)) {
+        if (living.hasData(ModAttachments.THIRST_DATA)) {
             ThirstData thirst = Thirst.data((Entity)living);
             int thirstMax = Math.max(1, thirst.maxThirst());
             float thirstPct = Math.max(0.0f, Math.min(1.0f, (float)thirst.thirst() / (float)thirstMax));
@@ -146,7 +115,7 @@ public final class HungerDebugRendering {
     private static String statusLine(LivingEntity entity) {
         HungerData data = Hunger.data((Entity)entity);
         StringBuilder text = new StringBuilder("F:").append(data.hunger()).append('/').append(data.maxHunger());
-        if (entity.hasData(ThirstAttachments.THIRST_DATA)) {
+        if (entity.hasData(ModAttachments.THIRST_DATA)) {
             ThirstData thirst = Thirst.data((Entity)entity);
             text.append(" T:").append(thirst.thirst()).append('/').append(thirst.maxThirst());
         }
@@ -197,12 +166,12 @@ public final class HungerDebugRendering {
         if (entity instanceof Sheep && (sheep = (Sheep)entity).isSheared()) {
             text.append(" shorn");
         }
-        if (entity.hasData(HerdAttachments.MOTHER)
-                && ((MotherData)entity.getData(HerdAttachments.MOTHER)).isActive(entity.level().getGameTime())) {
+        if (entity.hasData(ModAttachments.MOTHER)
+                && ((MotherData)entity.getData(ModAttachments.MOTHER)).isActive(entity.level().getGameTime())) {
             text.append(" mother");
         }
-        if (entity.hasData(DebugAttachments.PANIC_PHASE)) {
-            byte ordinal = (Byte)entity.getData(DebugAttachments.PANIC_PHASE);
+        if (entity.hasData(ModAttachments.PANIC_PHASE)) {
+            byte ordinal = (Byte)entity.getData(ModAttachments.PANIC_PHASE);
             HerdManager.PanicPhase[] phases = HerdManager.PanicPhase.values();
             if (ordinal > 0 && ordinal < phases.length) {
                 text.append(" panic:").append(phases[ordinal].name().toLowerCase());
@@ -221,7 +190,7 @@ public final class HungerDebugRendering {
             text.append(" H:--");
             return;
         }
-        int dist = (int)Math.sqrt(animal.distanceToSqr(Vec3.atCenterOf((Vec3i)home.get().pos())));
+        int dist = (int)Math.sqrt(animal.distanceToSqr(Vec3.atCenterOf(home.get().pos())));
         text.append(" H:").append(dist);
         if (home.get().temporary()) {
             text.append("tmp");
@@ -229,10 +198,10 @@ public final class HungerDebugRendering {
     }
 
     private static void appendHerd(StringBuilder text, LivingEntity entity) {
-        if (!entity.hasData(HerdAttachments.HERD_DATA)) {
+        if (!entity.hasData(ModAttachments.HERD_DATA)) {
             return;
         }
-        text.append(((HerdData)entity.getData(HerdAttachments.HERD_DATA)).alpha() ? " a" : " h");
+        text.append(((HerdData)entity.getData(ModAttachments.HERD_DATA)).alpha() ? " a" : " h");
     }
 }
 

@@ -1,21 +1,19 @@
 package com.charybdis180.ethological.home.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.Avoidance;
 import com.charybdis180.ethological.avoidance.CliffAvoidance;
 import com.charybdis180.ethological.avoidance.CrowdGrid;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
 import com.charybdis180.ethological.herd.SpeciesHerdSettings;
 import com.charybdis180.ethological.herd.goal.FollowPathing;
 import com.charybdis180.ethological.home.FenceDetection;
-import com.charybdis180.ethological.home.HomeAttachments;
 import com.charybdis180.ethological.home.HomeSettingsManager;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.home.MigrationPathPlanner;
 import com.charybdis180.ethological.home.NomadicMigration;
 import com.charybdis180.ethological.home.SpeciesHomeSettings;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -121,7 +119,7 @@ public class MigrateGoal extends Goal {
         if (HomeSettingsManager.get(this.mob.getType()).isEmpty()) {
             return false;
         }
-        if (this.mob.isBaby() && this.mob.hasData(HerdAttachments.MOTHER)) {
+        if (this.mob.isBaby() && this.mob.hasData(ModAttachments.MOTHER)) {
             return false;
         }
         // Only the herd alpha migrates; members trail it via FollowAlphaGoal. This
@@ -132,7 +130,7 @@ public class MigrateGoal extends Goal {
         if (Homes.effectiveHome(this.mob).isPresent()) {
             return false;
         }
-        if (this.mob.getData(SleepAttachments.SLEEPING) || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (this.mob.getData(ModAttachments.SLEEPING) || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
         if (NomadicMigration.isPaused(this.mob)) {
@@ -147,7 +145,8 @@ public class MigrateGoal extends Goal {
         boolean urgentYield = NomadicMigration.urgentNeedsYield(this.mob);
         boolean marchWin = NomadicMigration.isInNeedsMarchWindow(this.mob, now);
         boolean foodNow = NomadicMigration.canSatisfyUrgentFoodNow(this.mob);
-        if (urgentYield && (!marchWin || foodNow)) {
+        boolean waterNow = NomadicMigration.canSatisfyUrgentThirstNow(this.mob);
+        if (urgentYield && (!marchWin || foodNow || waterNow)) {
             NomadicMigration.beginNeedsPause(this.mob);
             return false;
         }
@@ -166,11 +165,11 @@ public class MigrateGoal extends Goal {
     public boolean canContinueToUse() {
         long now = this.mob.level().getGameTime();
         if (Homes.effectiveHome(this.mob).isPresent()
-                || this.mob.getData(SleepAttachments.SLEEPING)
-                || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+                || this.mob.getData(ModAttachments.SLEEPING)
+                || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
-        if (this.mob.isBaby() && this.mob.hasData(HerdAttachments.MOTHER)) {
+        if (this.mob.isBaby() && this.mob.hasData(ModAttachments.MOTHER)) {
             return false;
         }
         if (NomadicMigration.scheduleOwner(this.mob) != this.mob) {
@@ -179,11 +178,13 @@ public class MigrateGoal extends Goal {
         // A starving/thirsty alpha stops marching mid-leg: release MOVE so
         // EatFoodGoal/DrinkWaterGoal can run, and hold the herd in a needs pause
         // until fed (capped, then the herd resumes searching fresh ground). The
-        // march window only suppresses this while food is genuinely absent nearby.
+        // march window only suppresses this while food/water is genuinely absent
+        // nearby — reachable water appearing breaks the march immediately.
         boolean urgentYield = NomadicMigration.urgentNeedsYield(this.mob);
         boolean marchWin = NomadicMigration.isInNeedsMarchWindow(this.mob, now);
         boolean foodNow = NomadicMigration.canSatisfyUrgentFoodNow(this.mob);
-        if (urgentYield && (!marchWin || foodNow)) {
+        boolean waterNow = NomadicMigration.canSatisfyUrgentThirstNow(this.mob);
+        if (urgentYield && (!marchWin || foodNow || waterNow)) {
             NomadicMigration.beginNeedsPause(this.mob);
             return false;
         }
@@ -287,11 +288,11 @@ public class MigrateGoal extends Goal {
      */
     private boolean holdForHerd() {
         if (!(this.mob.level() instanceof ServerLevel serverLevel)
-                || !this.mob.hasData(HerdAttachments.HERD_DATA)) {
+                || !this.mob.hasData(ModAttachments.HERD_DATA)) {
             this.herdHoldUntil = Long.MIN_VALUE;
             return false;
         }
-        HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
         double leash = HerdSettingsManager.get(this.mob.getType())
                 .map(SpeciesHerdSettings::followDistance)
                 .orElse(10.0);
@@ -693,11 +694,11 @@ public class MigrateGoal extends Goal {
     private double readHeading() {
         Animal source = this.headingSource();
         NomadicMigration.ensureHeading(source);
-        return source.getData(HomeAttachments.NOMAD_HEADING);
+        return source.getData(ModAttachments.NOMAD_HEADING);
     }
 
     private void writeHeading(double heading) {
-        this.headingSource().setData(HomeAttachments.NOMAD_HEADING, heading);
+        this.headingSource().setData(ModAttachments.NOMAD_HEADING, heading);
     }
 
     /**

@@ -1,22 +1,6 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.PathfinderMob
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.ai.util.DefaultRandomPos
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.pathfinder.Path
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.herd.goal;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import java.util.EnumSet;
@@ -90,11 +74,11 @@ extends Goal {
                 Level level = this.mob.level();
                 if (!(level instanceof ServerLevel)) break block5;
                 serverLevel = (ServerLevel)level;
-                if (this.mob.hasData(HerdAttachments.HERD_DATA)) break block6;
+                if (this.mob.hasData(ModAttachments.HERD_DATA)) break block6;
             }
             return 0.0;
         }
-        HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(HerdAttachments.HERD_DATA)).herdId());
+        HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null) {
             return 0.0;
         }
@@ -102,14 +86,14 @@ extends Goal {
         for (UUID memberId : herd.members) {
             Entity member;
             if (memberId.equals(this.mob.getUUID()) || (member = serverLevel.getEntity(memberId)) == null) continue;
-            max = Math.max(max, (double)member.distanceTo((Entity)this.mob));
+            max = Math.max(max, (double)member.distanceTo(this.mob));
         }
         return max;
     }
 
     private LivingEntity findThreat() {
         LivingEntity living;
-        if (!this.mob.hasData(HerdAttachments.HERD_DATA) || !((HerdData)this.mob.getData(HerdAttachments.HERD_DATA)).alpha()) {
+        if (!this.mob.hasData(ModAttachments.HERD_DATA) || !((HerdData)this.mob.getData(ModAttachments.HERD_DATA)).alpha()) {
             return null;
         }
         if (HerdManager.panicPhaseOf(this.mob, this.mob.level().getGameTime()) != HerdManager.PanicPhase.WARY) {
@@ -120,7 +104,7 @@ extends Goal {
             return null;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(HerdAttachments.HERD_DATA)).herdId());
+        HerdManager.Herd herd = HerdManager.get(((HerdData)this.mob.getData(ModAttachments.HERD_DATA)).herdId());
         if (herd == null || herd.threatId() == null) {
             return null;
         }
@@ -128,7 +112,7 @@ extends Goal {
         if (!(entity instanceof LivingEntity) || !(living = (LivingEntity)entity).isAlive()) {
             return null;
         }
-        return living.distanceTo((Entity)this.mob) <= 36.0f ? living : null;
+        return living.distanceTo(this.mob) <= 36.0f ? living : null;
     }
 
     private void moveAway() {
@@ -138,7 +122,7 @@ extends Goal {
         for (int i = 0; i < 8; ++i) {
             double distanceSqr;
             Path path;
-            Vec3 candidate = DefaultRandomPos.getPosAway((PathfinderMob)this.mob, (int)16, (int)7, (Vec3)threatPos);
+            Vec3 candidate = DefaultRandomPos.getPosAway(this.mob, (int)16, (int)7, (Vec3)threatPos);
             if (candidate == null || (path = this.mob.getNavigation().createPath(candidate.x, candidate.y, candidate.z, 1)) == null || !path.canReach() || !((distanceSqr = candidate.distanceToSqr(threatPos)) > bestDistanceSqr)) continue;
             bestDistanceSqr = distanceSqr;
             bestPath = path;

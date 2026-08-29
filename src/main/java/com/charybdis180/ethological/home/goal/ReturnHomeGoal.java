@@ -1,22 +1,10 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.Goal$Flag
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.home.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.home.HomeSettingsManager;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.home.SpeciesHomeSettings;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
 import com.charybdis180.ethological.thirst.Thirst;
@@ -49,10 +37,10 @@ extends Goal {
         if (sleepSettings.isEmpty()) {
             return false;
         }
-        if (((Boolean)this.mob.getData(SleepAttachments.SLEEPING)).booleanValue() || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (this.mob.getData(ModAttachments.SLEEPING) || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return false;
         }
-        if (Hunger.isUrgentlyHungry((Entity)this.mob) || Thirst.isUrgentlyThirsty((Entity)this.mob)) {
+        if (Hunger.isUrgentlyHungry(this.mob) || Thirst.isUrgentlyThirsty(this.mob)) {
             return false;
         }
         long dayTime = this.mob.level().getDayTime();
@@ -64,7 +52,7 @@ extends Goal {
             if (home.isEmpty()) {
                 return false;
             }
-            double distance = Math.sqrt(this.mob.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)home.get()))));
+            double distance = Math.sqrt(this.mob.distanceToSqr(Vec3.atCenterOf(((Vec3i)home.get()))));
             long lead = Math.min(3000L, 200L + (long)(distance / 0.2));
             if (Homes.ticksUntilSleepStart(dayTime, sleepSettings.get().sleepStartTick()) > lead) {
                 return false;
@@ -93,7 +81,13 @@ extends Goal {
     }
 
     private void moveHome() {
-        this.mob.getNavigation().moveTo((double)this.homePos.getX() + 0.5, (double)this.homePos.getY(), (double)this.homePos.getZ() + 0.5, 1.2);
+        BlockPos anchored = Homes.surfaceStandForMove(this.mob.level(), this.homePos, this.mob);
+        if (anchored == null) {
+            // No usable surface stand: keep the original home aim rather than stalling.
+            anchored = this.homePos;
+        }
+        anchored = Homes.offsetStandFromCorners(this.mob.level(), anchored);
+        this.mob.getNavigation().moveTo((double)anchored.getX() + 0.5, (double)anchored.getY(), (double)anchored.getZ() + 0.5, 1.2);
     }
 }
 

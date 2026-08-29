@@ -1,11 +1,6 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.world.entity.Entity
- */
 package com.charybdis180.ethological.thirst;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
@@ -21,16 +16,12 @@ public final class Thirst {
         return ThirstSettingsManager.get(entity.getType()).isPresent();
     }
 
-    public static Optional<SpeciesThirstSettings> settingsOf(Entity entity) {
-        return ThirstSettingsManager.get(entity.getType());
-    }
-
     public static boolean hasThirstData(Entity entity) {
-        return entity.hasData(ThirstAttachments.THIRST_DATA);
+        return entity.hasData(ModAttachments.THIRST_DATA);
     }
 
     public static ThirstData data(Entity entity) {
-        return (ThirstData)entity.getData(ThirstAttachments.THIRST_DATA);
+        return (ThirstData)entity.getData(ModAttachments.THIRST_DATA);
     }
 
     public static int getThirst(Entity entity) {
@@ -102,7 +93,7 @@ public final class Thirst {
     }
 
     public static void setData(Entity entity, ThirstData data) {
-        entity.setData(ThirstAttachments.THIRST_DATA,data);
+        entity.setData(ModAttachments.THIRST_DATA,data);
     }
 }
 

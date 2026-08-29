@@ -1,10 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.google.gson.JsonObject
- *  net.minecraft.resources.ResourceLocation
- */
 package com.charybdis180.ethological.sleep;
 
 import com.google.gson.JsonObject;

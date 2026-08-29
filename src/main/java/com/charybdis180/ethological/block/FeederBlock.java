@@ -1,32 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Direction
- *  net.minecraft.util.StringRepresentable
- *  net.minecraft.world.InteractionResult
- *  net.minecraft.world.MenuProvider
- *  net.minecraft.world.entity.player.Player
- *  net.minecraft.world.item.ItemStack
- *  net.minecraft.world.item.context.BlockPlaceContext
- *  net.minecraft.world.level.ItemLike
- *  net.minecraft.world.level.Level
- *  net.minecraft.world.level.block.BaseEntityBlock
- *  net.minecraft.world.level.block.Block
- *  net.minecraft.world.level.block.HorizontalDirectionalBlock
- *  net.minecraft.world.level.block.RenderShape
- *  net.minecraft.world.level.block.entity.BlockEntity
- *  net.minecraft.world.level.block.state.BlockBehaviour$Properties
- *  net.minecraft.world.level.block.state.BlockState
- *  net.minecraft.world.level.block.state.StateDefinition$Builder
- *  net.minecraft.world.level.block.state.properties.DirectionProperty
- *  net.minecraft.world.level.block.state.properties.EnumProperty
- *  net.minecraft.world.level.block.state.properties.Property
- *  net.minecraft.world.level.storage.loot.LootParams$Builder
- *  net.minecraft.world.phys.BlockHitResult
- *  net.neoforged.neoforge.items.ItemStackHandler
- */
 package com.charybdis180.ethological.block;
 
 import com.charybdis180.ethological.block.FeederBlockEntity;

@@ -1,6 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- */
 package com.charybdis180.ethological.social;
 
 import java.util.UUID;

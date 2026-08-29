@@ -1,21 +1,6 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.server.level.ServerLevel
- *  net.minecraft.server.packs.resources.PreparableReloadListener
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.ai.attributes.AttributeInstance
- *  net.minecraft.world.entity.ai.attributes.Attributes
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.level.Level
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.AddReloadListenerEvent
- *  net.neoforged.neoforge.event.tick.EntityTickEvent$Post
- */
 package com.charybdis180.ethological.growth;
 
-import com.charybdis180.ethological.growth.GrowthAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.growth.GrowthData;
 import com.charybdis180.ethological.growth.GrowthSettingsManager;
 import com.charybdis180.ethological.growth.SpeciesGrowthSettings;
@@ -39,7 +24,7 @@ public final class GrowthEvents {
 
     @SubscribeEvent
     public static void onAddReloadListeners(AddReloadListenerEvent event) {
-        event.addListener((PreparableReloadListener)new GrowthSettingsManager());
+        event.addListener(new GrowthSettingsManager());
     }
 
     @SubscribeEvent
@@ -62,11 +47,11 @@ public final class GrowthEvents {
         if (settingsOpt.isEmpty()) {
             return;
         }
-        if (animal.hasData(GrowthAttachments.GROWTH)) {
-            data = (GrowthData)animal.getData(GrowthAttachments.GROWTH);
+        if (animal.hasData(ModAttachments.GROWTH)) {
+            data = (GrowthData)animal.getData(ModAttachments.GROWTH);
         } else {
             data = GrowthEvents.initialize(animal, settingsOpt.get(), serverLevel.getGameTime());
-            animal.setData(GrowthAttachments.GROWTH,data);
+            animal.setData(ModAttachments.GROWTH,data);
         }
         long now = serverLevel.getGameTime();
         if (now >= data.growUpGameTime()) {
@@ -74,7 +59,7 @@ public final class GrowthEvents {
             if (scale != null) {
                 scale.setBaseValue((double)data.initialScale());
             }
-            animal.removeData(GrowthAttachments.GROWTH);
+            animal.removeData(ModAttachments.GROWTH);
             animal.setAge(0);
             return;
         }
@@ -91,7 +76,7 @@ public final class GrowthEvents {
             long shift = (long)((double)ageBoost * (double)span / 24000.0);
             if (shift > 0L) {
                 data = new GrowthData(data.birthGameTime(), data.growUpGameTime() - shift, data.initialScale(), data.targetScale());
-                animal.setData(GrowthAttachments.GROWTH,data);
+                animal.setData(ModAttachments.GROWTH,data);
             }
         }
         animal.setBaby(true);

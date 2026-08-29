@@ -1,22 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.Mob
- *  net.minecraft.world.entity.ai.goal.Goal
- *  net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.entity.animal.Chicken
- *  net.minecraft.world.entity.animal.Cow
- *  net.minecraft.world.entity.animal.Pig
- *  net.minecraft.world.entity.animal.Rabbit
- *  net.minecraft.world.entity.animal.Sheep
- *  net.minecraft.world.entity.animal.Wolf
- *  net.neoforged.bus.api.SubscribeEvent
- *  net.neoforged.neoforge.event.entity.EntityJoinLevelEvent
- */
 package com.charybdis180.ethological.herd;
 
 import com.charybdis180.ethological.config.EthologicalConfig;
@@ -47,7 +28,7 @@ public final class WolfEvents {
             return;
         }
         Wolf wolf = (Wolf)entity;
-        if (!((Boolean)EthologicalConfig.CONFIG.comfort.wildWolvesHuntLivestock.get()).booleanValue()) {
+        if (!EthologicalConfig.CONFIG.comfort.wildWolvesHuntLivestock.get()) {
             return;
         }
         wolf.targetSelector.addGoal(5, new NearestAttackableTargetGoal<>(wolf, Animal.class, 10, true, false, living -> !wolf.isTame() && WolfEvents.isLivestockPrey(living)));

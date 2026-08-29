@@ -1,20 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.registries.BuiltInRegistries
- *  net.minecraft.resources.ResourceLocation
- *  net.minecraft.world.entity.EntityType
- *  net.minecraft.world.level.block.Block
- *  net.neoforged.neoforge.common.ModConfigSpec
- *  net.neoforged.neoforge.common.ModConfigSpec$BooleanValue
- *  net.neoforged.neoforge.common.ModConfigSpec$Builder
- *  net.neoforged.neoforge.common.ModConfigSpec$ConfigValue
- *  net.neoforged.neoforge.common.ModConfigSpec$DoubleValue
- *  net.neoforged.neoforge.common.ModConfigSpec$EnumValue
- *  net.neoforged.neoforge.common.ModConfigSpec$IntValue
- *  org.apache.commons.lang3.tuple.Pair
- */
 package com.charybdis180.ethological.config;
 
 import com.charybdis180.ethological.Ethological;
@@ -43,6 +26,7 @@ public final class EthologicalConfig {
     private static final List<String> PIG_FOOD_BLOCKS;
     private static final List<String> CHICKEN_FOOD_BLOCKS;
     public final ComfortSection comfort;
+    public final CompatSection compat;
     public final SpeciesBundle sheep;
     public final SpeciesBundle cow;
     public final SpeciesBundle pig;
@@ -50,6 +34,7 @@ public final class EthologicalConfig {
 
     private EthologicalConfig(ModConfigSpec.Builder builder) {
         this.comfort = new ComfortSection(builder);
+        this.compat = new CompatSection(builder);
         this.sheep = new SpeciesBundle(builder, "sheep", new HungerDefaults(10, 2400, 1200, 1.0, 0, 1, 2.0, false, 1.0, DEFAULT_FOOD_BLOCKS, 4, 6, 24, 30, 30, 0.5, 2.0, 3.0, 3.0), new ThirstDefaults(10, 2400, false, 800, 1.0, 60, 1000, 2), new SleepDefaults(13000, 23000, 0, 1200, 4), new HomeDefaults(128, 48, 1000, 200, false, 1.0, 9500), new HerdDefaults(12, 20, 8.0, 3.0, 20.0, 0.08, 12.0, 1.0, 6, 12, 0, 2, FollowStyle.SURROUND), new GrowthDefaults(5, 7, 0.2, 0.6, List.of("chase", "headbutt"), true));
         this.cow = new SpeciesBundle(builder, "cow", new HungerDefaults(12, 2400, 1200, 1.0, 0, 1, 2.0, true, 1.0, DEFAULT_FOOD_BLOCKS, 2, 10, 40, 50, 50, 1.0, 2.0, 3.0, 3.0), new ThirstDefaults(10, 2400, true, 800, 1.0, 60, 1000, 2), new SleepDefaults(13000, 23000, 0, 1200, 4), new HomeDefaults(128, 80, 1000, 200, true, 0.8, 9500), new HerdDefaults(20, 32, 6.0, 3.0, 14.0, 0.08, 16.0, 1.0, 10, 20, 0, 3, FollowStyle.SURROUND), new GrowthDefaults(5, 7, 0.2, 0.6, List.of("chase", "headbutt"), true));
         this.pig = new SpeciesBundle(builder, "pig", new HungerDefaults(10, 2400, 1200, 1.0, 0, 1, 2.0, false, 1.0, PIG_FOOD_BLOCKS, 3, 6, 24, 30, 30, 1.0, 2.0, 3.0, 3.0), new ThirstDefaults(10, 2400, false, 800, 1.0, 60, 1000, 2), new SleepDefaults(13000, 23000, 0, 1200, 4), new HomeDefaults(128, 40, 1000, 200, false, 1.0, 9500), new HerdDefaults(8, 16, 6.0, 3.0, 18.0, 0.15, 12.0, 1.0, 4, 8, 0, 2, FollowStyle.SURROUND), new GrowthDefaults(5, 7, 0.2, 0.6, List.of("chase"), true));
@@ -228,6 +213,9 @@ public final class EthologicalConfig {
     }
 
     public static final class ComfortSection {
+        public final ModConfigSpec.DoubleValue hungerDrainMultiplier;
+        public final ModConfigSpec.DoubleValue thirstDrainMultiplier;
+        public final ModConfigSpec.BooleanValue avoidCliffSpawns;
         public final ModConfigSpec.DoubleValue heatDepletionMultiplier;
         public final ModConfigSpec.DoubleValue hotBiomeTemperature;
         public final ModConfigSpec.DoubleValue warmBiomeTemperature;
@@ -247,9 +235,13 @@ public final class EthologicalConfig {
         public final ModConfigSpec.DoubleValue yPenaltyWeight;
         public final ModConfigSpec.IntValue sleepSpotSpacing;
         public final ModConfigSpec.BooleanValue yieldOnBlock;
+        public final ModConfigSpec.DoubleValue crowdSpacingRadius;
 
         private ComfortSection(ModConfigSpec.Builder builder) {
             builder.comment("Comfort and life").translation(EthologicalConfig.key("comfort")).push("comfort");
+            this.hungerDrainMultiplier = builder.comment("Global hunger drain speed multiplier applied to every species (1.0 = normal, 2.0 = twice as fast, 0.5 = half as fast).").translation(EthologicalConfig.key("comfort", "hunger_drain_multiplier")).defineInRange("hunger_drain_multiplier", 1.0, 0.05, 20.0);
+            this.thirstDrainMultiplier = builder.comment("Global thirst drain speed multiplier applied to every species (1.0 = normal, 2.0 = twice as fast, 0.5 = half as fast).").translation(EthologicalConfig.key("comfort", "thirst_drain_multiplier")).defineInRange("thirst_drain_multiplier", 1.0, 0.05, 20.0);
+            this.avoidCliffSpawns = builder.comment("If true, natural herd spawns are rejected on cliff edges or steep drops so herds never form on cliff faces.").translation(EthologicalConfig.key("comfort", "avoid_cliff_spawns")).define("avoid_cliff_spawns", true);
             this.heatDepletionMultiplier = builder.comment("In heat, multiply thirst depletion interval by this (0.75 = faster thirst).").translation(EthologicalConfig.key("comfort", "heat_depletion_multiplier")).defineInRange("heat_depletion_multiplier", 0.75, 0.05, 1.0);
             this.hotBiomeTemperature = builder.comment("Biome base temperature at or above this always counts as hot.").translation(EthologicalConfig.key("comfort", "hot_biome_temperature")).defineInRange("hot_biome_temperature", 0.95, 0.0, 2.0);
             this.warmBiomeTemperature = builder.comment("Biome base temperature at or above this is hot during midday.").translation(EthologicalConfig.key("comfort", "warm_biome_temperature")).defineInRange("warm_biome_temperature", 0.8, 0.0, 2.0);
@@ -267,8 +259,19 @@ public final class EthologicalConfig {
             this.pastureRegrowDelayTicks = builder.comment("Ticks before grazed dirt may restore to grass (9600 \u2248 8 minutes).").translation(EthologicalConfig.key("comfort", "pasture_regrow_delay_ticks")).defineInRange("pasture_regrow_delay_ticks", 9600, 200, 240000);
             this.pastureRegrowMaxPerChunk = builder.comment("Max pending dirt-to-grass restores queued per chunk.").translation(EthologicalConfig.key("comfort", "pasture_regrow_max_per_chunk")).defineInRange("pasture_regrow_max_per_chunk", 24, 1, 256);
             this.yPenaltyWeight = builder.comment("Y-difference penalty in the food/water target score (score = distanceSqr + dy*dy * weight). Higher strongly prefers targets near the animal's own Y; 0 = pure nearest distance.").translation(EthologicalConfig.key("comfort", "y_penalty_weight")).defineInRange("y_penalty_weight", 16.0, 0.0, 256.0);
-            this.sleepSpotSpacing = builder.comment("Horizontal gap between herd members' individual sleep spots (0 = no gap, just never two on the same block).").translation(EthologicalConfig.key("comfort", "sleep_spot_spacing")).defineInRange("sleep_spot_spacing", 0, 0, 8);
+            this.sleepSpotSpacing = builder.comment("Horizontal gap between herd members' individual sleep spots (0 = no gap, just never two on the same block).").translation(EthologicalConfig.key("comfort", "sleep_spot_spacing")).defineInRange("sleep_spot_spacing", 1, 0, 8);
             this.yieldOnBlock = builder.comment("If true, a stationary animal steps aside when a pathing herd-mate is stuck against it.").translation(EthologicalConfig.key("comfort", "yield_on_block")).define("yield_on_block", true);
+            this.crowdSpacingRadius = builder.comment("Preferred clear space (blocks) animals aim for when choosing where to walk or stand. Soft preference only - never physically pushes animals.").translation(EthologicalConfig.key("comfort", "crowd_spacing_radius")).defineInRange("crowd_spacing_radius", 2.5, 1.0, 4.0);
+            builder.pop();
+        }
+    }
+
+    public static final class CompatSection {
+        public final ModConfigSpec.BooleanValue betterDaysSyncDrain;
+
+        private CompatSection(ModConfigSpec.Builder builder) {
+            builder.comment("Mod compatibility").translation(EthologicalConfig.key("compat")).push("compat");
+            this.betterDaysSyncDrain = builder.comment("If true and Better Days is installed, hunger/thirst drain scales with the current day length so animals eat and drink the same number of times per day-cycle.").translation(EthologicalConfig.key("compat", "better_days_sync_drain")).define("better_days_sync_drain", true);
             builder.pop();
         }
     }

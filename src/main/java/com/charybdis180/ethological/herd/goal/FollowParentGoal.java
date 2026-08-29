@@ -1,16 +1,12 @@
 package com.charybdis180.ethological.herd.goal;
 
-import com.charybdis180.ethological.herd.HerdAttachments;
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
 import com.charybdis180.ethological.herd.MotherData;
 import com.charybdis180.ethological.herd.SpeciesHerdSettings;
 import com.charybdis180.ethological.hunger.Hunger;
-import com.charybdis180.ethological.hunger.HungerAttachments;
-import com.charybdis180.ethological.sleep.SleepAttachments;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.thirst.Thirst;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
 import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -40,10 +36,10 @@ public class FollowParentGoal extends Goal {
 
     /** True when a mothered baby is beyond the species mother-follow leash. */
     public static boolean isAwayFromMother(Animal animal) {
-        if (!animal.isBaby() || !animal.hasData(HerdAttachments.MOTHER)) {
+        if (!animal.isBaby() || !animal.hasData(ModAttachments.MOTHER)) {
             return false;
         }
-        MotherData data = animal.getData(HerdAttachments.MOTHER);
+        MotherData data = animal.getData(ModAttachments.MOTHER);
         if (!data.isActive(animal.level().getGameTime())) {
             return false;
         }
@@ -62,15 +58,15 @@ public class FollowParentGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        if (!this.mob.isBaby() || !this.mob.hasData(HerdAttachments.MOTHER)) {
+        if (!this.mob.isBaby() || !this.mob.hasData(ModAttachments.MOTHER)) {
             return false;
         }
         if (this.shouldYield()) {
             return false;
         }
-        MotherData data = this.mob.getData(HerdAttachments.MOTHER);
+        MotherData data = this.mob.getData(ModAttachments.MOTHER);
         if (!data.isActive(this.mob.level().getGameTime())) {
-            this.mob.removeData(HerdAttachments.MOTHER);
+            this.mob.removeData(ModAttachments.MOTHER);
             return false;
         }
         this.parent = resolveMother(this.mob, data);
@@ -82,15 +78,15 @@ public class FollowParentGoal extends Goal {
         if (this.parent == null || !this.parent.isAlive() || !this.mob.isBaby()) {
             return false;
         }
-        if (!this.mob.hasData(HerdAttachments.MOTHER)) {
+        if (!this.mob.hasData(ModAttachments.MOTHER)) {
             return false;
         }
         if (this.shouldYield()) {
             return false;
         }
-        MotherData data = this.mob.getData(HerdAttachments.MOTHER);
+        MotherData data = this.mob.getData(ModAttachments.MOTHER);
         if (!data.isActive(this.mob.level().getGameTime())) {
-            this.mob.removeData(HerdAttachments.MOTHER);
+            this.mob.removeData(ModAttachments.MOTHER);
             return false;
         }
         return !FollowPathing.arrived(this.mob, this.arriveDistance(), this.parent.blockPosition());
@@ -132,14 +128,14 @@ public class FollowParentGoal extends Goal {
     }
 
     private boolean shouldYield() {
-        if (Boolean.TRUE.equals(this.mob.getData(SleepAttachments.SLEEPING))
-                || this.mob.hasData(SleepAttachments.SLEEP_DISTURBANCE)) {
+        if (Boolean.TRUE.equals(this.mob.getData(ModAttachments.SLEEPING))
+                || this.mob.hasData(ModAttachments.SLEEP_DISTURBANCE)) {
             return true;
         }
-        if (this.mob.hasData(SocialAttachments.PLAY) || this.mob.hasData(SocialAttachments.STARTLE)) {
+        if (this.mob.hasData(ModAttachments.PLAY) || this.mob.hasData(ModAttachments.STARTLE)) {
             return true;
         }
-        if (this.mob.hasData(HungerAttachments.FOOD_TARGET) || this.mob.hasData(ThirstAttachments.WATER_TARGET)) {
+        if (this.mob.hasData(ModAttachments.FOOD_TARGET) || this.mob.hasData(ModAttachments.WATER_TARGET)) {
             return true;
         }
         if (Hunger.isUrgentlyHungry(this.mob) || Thirst.isUrgentlyThirsty(this.mob)) {

@@ -1,7 +1,7 @@
 package com.charybdis180.ethological.avoidance.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.avoidance.Avoidance;
-import com.charybdis180.ethological.avoidance.AvoidanceAttachments;
 import com.charybdis180.ethological.avoidance.AvoidanceHazard;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.util.FleePathing;
@@ -90,13 +90,13 @@ public class AvoidHazardGoal extends Goal {
         if (!(level instanceof ServerLevel serverLevel)) {
             return null;
         }
-        if (!this.mob.hasData(AvoidanceAttachments.HAZARD)) {
+        if (!this.mob.hasData(ModAttachments.HAZARD)) {
             return null;
         }
-        AvoidanceHazard hazard = this.mob.getData(AvoidanceAttachments.HAZARD);
+        AvoidanceHazard hazard = this.mob.getData(ModAttachments.HAZARD);
         long now = serverLevel.getGameTime();
         if (!Avoidance.hazardStillValid(serverLevel, hazard, this.mob.blockPosition(), now)) {
-            this.mob.removeData(AvoidanceAttachments.HAZARD);
+            this.mob.removeData(ModAttachments.HAZARD);
             return null;
         }
         return hazard.pos();
@@ -109,7 +109,7 @@ public class AvoidHazardGoal extends Goal {
         double speed = this.currentSpeed();
         Vec3 threat = Vec3.atCenterOf(this.hazardPos);
         Path path = FleePathing.beelineAway(
-                (PathfinderMob)this.mob,
+                this.mob,
                 threat,
                 Avoidance.FLEE_DISTANCE,
                 Avoidance.FLEE_PATH_ATTEMPTS);

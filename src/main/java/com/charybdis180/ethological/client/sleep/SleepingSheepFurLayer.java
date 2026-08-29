@@ -1,31 +1,10 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  com.mojang.blaze3d.vertex.PoseStack
- *  com.mojang.blaze3d.vertex.VertexConsumer
- *  net.minecraft.client.Minecraft
- *  net.minecraft.client.model.EntityModel
- *  net.minecraft.client.model.geom.EntityModelSet
- *  net.minecraft.client.model.geom.ModelLayers
- *  net.minecraft.client.renderer.MultiBufferSource
- *  net.minecraft.client.renderer.RenderType
- *  net.minecraft.client.renderer.entity.LivingEntityRenderer
- *  net.minecraft.client.renderer.entity.RenderLayerParent
- *  net.minecraft.client.renderer.entity.layers.RenderLayer
- *  net.minecraft.resources.ResourceLocation
- *  net.minecraft.util.FastColor$ARGB32
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.LivingEntity
- *  net.minecraft.world.entity.animal.Sheep
- *  net.minecraft.world.item.DyeColor
- */
 package com.charybdis180.ethological.client.sleep;
 
 import com.charybdis180.ethological.client.sleep.BabyModelLayers;
 import com.charybdis180.ethological.client.sleep.BabySheepFurModel;
 import com.charybdis180.ethological.client.sleep.SleepingSheepFurModel;
 import com.charybdis180.ethological.client.sleep.SleepingSheepModel;
+import com.charybdis180.ethological.config.EthologicalClientConfig;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
@@ -50,19 +29,25 @@ extends RenderLayer<Sheep, SleepingSheepModel> {
     private static final ResourceLocation BABY_SHEEP_FUR_LOCATION = ResourceLocation.fromNamespaceAndPath((String)"ethological", (String)"textures/entity/sheep/sheep_baby_wool.png");
     private final SleepingSheepFurModel adultModel;
     private final BabySheepFurModel babyModel;
+    private final boolean useBabyModels;
 
     public SleepingSheepFurLayer(RenderLayerParent<Sheep, SleepingSheepModel> renderer, EntityModelSet modelSet) {
+        this(renderer, modelSet, EthologicalClientConfig.useModernBabyModels());
+    }
+
+    public SleepingSheepFurLayer(RenderLayerParent<Sheep, SleepingSheepModel> renderer, EntityModelSet modelSet, boolean useBabyModels) {
         super(renderer);
         this.adultModel = new SleepingSheepFurModel(modelSet.bakeLayer(ModelLayers.SHEEP_FUR));
-        this.babyModel = new BabySheepFurModel(modelSet.bakeLayer(BabyModelLayers.BABY_SHEEP_WOOL));
+        this.babyModel = useBabyModels ? new BabySheepFurModel(modelSet.bakeLayer(BabyModelLayers.BABY_SHEEP_WOOL)) : null;
+        this.useBabyModels = useBabyModels;
     }
 
     private SleepingSheepFurModel activeModel(Sheep entity) {
-        return entity.isBaby() ? this.babyModel : this.adultModel;
+        return this.useBabyModels && entity.isBaby() ? this.babyModel : this.adultModel;
     }
 
     private ResourceLocation activeTexture(Sheep entity) {
-        return entity.isBaby() ? BABY_SHEEP_FUR_LOCATION : SHEEP_FUR_LOCATION;
+        return this.useBabyModels && entity.isBaby() ? BABY_SHEEP_FUR_LOCATION : SHEEP_FUR_LOCATION;
     }
 
     public void render(PoseStack poseStack, MultiBufferSource buffer, int packedLight, Sheep livingEntity, float limbSwing, float limbSwingAmount, float partialTicks, float ageInTicks, float netHeadYaw, float headPitch) {

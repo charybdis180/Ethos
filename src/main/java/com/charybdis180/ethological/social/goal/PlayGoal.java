@@ -1,25 +1,23 @@
 package com.charybdis180.ethological.social.goal;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.growth.GrowthSettingsManager;
 import com.charybdis180.ethological.growth.SpeciesGrowthSettings;
-import com.charybdis180.ethological.herd.HerdAttachments;
 import com.charybdis180.ethological.herd.HerdData;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.herd.HerdSettingsManager;
 import com.charybdis180.ethological.herd.SpeciesHerdSettings;
-import com.charybdis180.ethological.hunger.HungerAttachments;
+import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.home.NomadicMigration;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.social.PlayData;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.social.SocialCalm;
-import com.charybdis180.ethological.thirst.ThirstAttachments;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
@@ -57,10 +55,10 @@ extends Goal {
 
     public boolean canUse() {
         float rollChance;
-        if (this.mob.hasData(SocialAttachments.PLAY)) {
-            PlayData data = (PlayData)this.mob.getData(SocialAttachments.PLAY);
+        if (this.mob.hasData(ModAttachments.PLAY)) {
+            PlayData data = (PlayData)this.mob.getData(ModAttachments.PLAY);
             if (this.mob.level().getGameTime() >= data.untilGameTime() || this.resolvePartner() == null) {
-                this.mob.removeData(SocialAttachments.PLAY);
+                this.mob.removeData(ModAttachments.PLAY);
                 return false;
             }
             return true;
@@ -100,10 +98,10 @@ extends Goal {
         if (NomadicMigration.isTraveling(this.mob)) {
             return false;
         }
-        if (!this.mob.hasData(SocialAttachments.PLAY)) {
+        if (!this.mob.hasData(ModAttachments.PLAY)) {
             return false;
         }
-        if (this.mob.level().getGameTime() >= ((PlayData)this.mob.getData(SocialAttachments.PLAY)).untilGameTime()) {
+        if (this.mob.level().getGameTime() >= ((PlayData)this.mob.getData(ModAttachments.PLAY)).untilGameTime()) {
             return false;
         }
         if (!SocialCalm.stillCalm(this.mob)) {
@@ -121,12 +119,12 @@ extends Goal {
         this.phaseTicks = 0;
         this.buttPhase = 0;
         this.wasInBout = true;
-        if (!this.mob.hasData(SocialAttachments.PLAY) && this.pendingPartner != null && this.pendingStyle != null) {
+        if (!this.mob.hasData(ModAttachments.PLAY) && this.pendingPartner != null && this.pendingStyle != null) {
             Animal partner = this.pendingPartner;
             PlayData.PlayStyle style = this.pendingStyle;
             long until = this.mob.level().getGameTime() + 240L + (long)this.mob.getRandom().nextInt(160);
-            this.mob.setData(SocialAttachments.PLAY, new PlayData(partner.getUUID(), until, style, true, false));
-            partner.setData(SocialAttachments.PLAY, new PlayData(this.mob.getUUID(), until, style, false, false));
+            this.mob.setData(ModAttachments.PLAY, new PlayData(partner.getUUID(), until, style, true, false));
+            partner.setData(ModAttachments.PLAY, new PlayData(this.mob.getUUID(), until, style, false, false));
             this.partner = partner;
         }
         this.pendingPartner = null;
@@ -134,15 +132,15 @@ extends Goal {
     }
 
     public void tick() {
-        if (this.partner == null || !this.mob.hasData(SocialAttachments.PLAY)) {
+        if (this.partner == null || !this.mob.hasData(ModAttachments.PLAY)) {
             return;
         }
         if (this.tooFarFromHerd()) {
             this.endBout();
             return;
         }
-        PlayData data = (PlayData)this.mob.getData(SocialAttachments.PLAY);
-        this.mob.getLookControl().setLookAt((Entity)this.partner, 10.0f, (float)this.mob.getMaxHeadXRot());
+        PlayData data = (PlayData)this.mob.getData(ModAttachments.PLAY);
+        this.mob.getLookControl().setLookAt(this.partner, 10.0f, (float)this.mob.getMaxHeadXRot());
         if (data.style() == PlayData.PlayStyle.HEADBUTT) {
             this.tickHeadbutt(data);
         } else {
@@ -154,15 +152,15 @@ extends Goal {
         this.mob.getNavigation().stop();
         this.pendingPartner = null;
         this.pendingStyle = null;
-        if (this.mob.hasData(SocialAttachments.PLAY)) {
+        if (this.mob.hasData(ModAttachments.PLAY)) {
             Animal partner;
             ServerLevel serverLevel;
             Entity entity;
             Level level;
-            PlayData data = (PlayData)this.mob.getData(SocialAttachments.PLAY);
-            this.mob.removeData(SocialAttachments.PLAY);
-            if (data.initiator() && (level = this.mob.level()) instanceof ServerLevel && (entity = (serverLevel = (ServerLevel)level).getEntity(data.partnerId())) instanceof Animal && (partner = (Animal)entity).hasData(SocialAttachments.PLAY) && ((PlayData)partner.getData(SocialAttachments.PLAY)).partnerId().equals(this.mob.getUUID())) {
-                partner.removeData(SocialAttachments.PLAY);
+            PlayData data = (PlayData)this.mob.getData(ModAttachments.PLAY);
+            this.mob.removeData(ModAttachments.PLAY);
+            if (data.initiator() && (level = this.mob.level()) instanceof ServerLevel && (entity = (serverLevel = (ServerLevel)level).getEntity(data.partnerId())) instanceof Animal && (partner = (Animal)entity).hasData(ModAttachments.PLAY) && ((PlayData)partner.getData(ModAttachments.PLAY)).partnerId().equals(this.mob.getUUID())) {
+                partner.removeData(ModAttachments.PLAY);
             }
         }
         if (this.wasInBout) {
@@ -179,15 +177,15 @@ extends Goal {
         }
         if (data.initiator()) {
             if (this.repathCooldown <= 0 || this.mob.getNavigation().isDone()) {
-                this.mob.getNavigation().moveTo((Entity)this.partner, 1.35);
+                this.mob.getNavigation().moveTo(this.partner, 1.35);
                 this.repathCooldown = 10;
             }
-            if ((double)this.mob.distanceTo((Entity)this.partner) <= 1.8) {
+            if ((double)this.mob.distanceTo(this.partner) <= 1.8) {
                 this.playEffects();
                 if (!data.swapped() && this.mob.getRandom().nextBoolean()) {
                     long until = data.untilGameTime();
-                    this.mob.setData(SocialAttachments.PLAY,new PlayData(this.partner.getUUID(), until, PlayData.PlayStyle.CHASE, false, true));
-                    this.partner.setData(SocialAttachments.PLAY,new PlayData(this.mob.getUUID(), until, PlayData.PlayStyle.CHASE, true, true));
+                    this.mob.setData(ModAttachments.PLAY,new PlayData(this.partner.getUUID(), until, PlayData.PlayStyle.CHASE, false, true));
+                    this.partner.setData(ModAttachments.PLAY,new PlayData(this.mob.getUUID(), until, PlayData.PlayStyle.CHASE, true, true));
                 } else {
                     this.endBout();
                 }
@@ -195,7 +193,13 @@ extends Goal {
         } else if (this.repathCooldown <= 0 || this.mob.getNavigation().isDone()) {
             Vec3 away = this.fleePosNearHerd();
             if (away != null) {
-                this.mob.getNavigation().moveTo(away.x, away.y, away.z, 1.25);
+                BlockPos anchored = Homes.surfaceStandForMove(this.mob.level(), BlockPos.containing(away), this.mob);
+                if (anchored == null) {
+                    this.endBout();
+                    return;
+                }
+                anchored = Homes.offsetStandFromCorners(this.mob.level(), anchored);
+                this.mob.getNavigation().moveTo(anchored.getX() + 0.5, anchored.getY(), anchored.getZ() + 0.5, 1.25);
             } else {
                 this.endBout();
                 return;
@@ -209,14 +213,14 @@ extends Goal {
             this.mob.getNavigation().stop();
             return;
         }
-        double dist = this.mob.distanceTo((Entity)this.partner);
+        double dist = this.mob.distanceTo(this.partner);
         if (this.buttPhase == 0) {
             if (dist <= 4.0) {
                 this.buttPhase = 1;
                 this.phaseTicks = 0;
                 this.mob.getNavigation().stop();
             } else if (--this.repathCooldown <= 0 || this.mob.getNavigation().isDone()) {
-                this.mob.getNavigation().moveTo((Entity)this.partner, 1.3);
+                this.mob.getNavigation().moveTo(this.partner, 1.3);
                 this.repathCooldown = 10;
             }
             return;
@@ -226,7 +230,7 @@ extends Goal {
             if (++this.phaseTicks >= 25) {
                 this.buttPhase = 2;
                 this.phaseTicks = 0;
-                this.mob.getNavigation().moveTo((Entity)this.partner, 1.7);
+                this.mob.getNavigation().moveTo(this.partner, 1.7);
             }
             return;
         }
@@ -241,7 +245,7 @@ extends Goal {
             return;
         }
         if (this.mob.getNavigation().isDone()) {
-            this.mob.getNavigation().moveTo((Entity)this.partner, 1.7);
+            this.mob.getNavigation().moveTo(this.partner, 1.7);
         }
     }
 
@@ -256,7 +260,7 @@ extends Goal {
         Level level = this.mob.level();
         if (level instanceof ServerLevel) {
             ServerLevel serverLevel = (ServerLevel)level;
-            serverLevel.sendParticles((ParticleOptions)ParticleTypes.POOF, this.partner.getX(), this.partner.getY() + 0.5, this.partner.getZ(), 8, 0.25, 0.25, 0.25, 0.02);
+            serverLevel.sendParticles(ParticleTypes.POOF, this.partner.getX(), this.partner.getY() + 0.5, this.partner.getZ(), 8, 0.25, 0.25, 0.25, 0.02);
         }
     }
 
@@ -264,14 +268,14 @@ extends Goal {
         Level level = this.mob.level();
         if (level instanceof ServerLevel) {
             ServerLevel serverLevel = (ServerLevel)level;
-            serverLevel.sendParticles((ParticleOptions)ParticleTypes.HAPPY_VILLAGER, this.partner.getX(), this.partner.getY() + 0.6, this.partner.getZ(), 6, 0.3, 0.3, 0.3, 0.0);
+            serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.partner.getX(), this.partner.getY() + 0.6, this.partner.getZ(), 6, 0.3, 0.3, 0.3, 0.0);
         }
     }
 
     private void endBout() {
-        this.mob.removeData(SocialAttachments.PLAY);
-        if (this.partner != null && this.partner.hasData(SocialAttachments.PLAY) && ((PlayData)this.partner.getData(SocialAttachments.PLAY)).partnerId().equals(this.mob.getUUID())) {
-            this.partner.removeData(SocialAttachments.PLAY);
+        this.mob.removeData(ModAttachments.PLAY);
+        if (this.partner != null && this.partner.hasData(ModAttachments.PLAY) && ((PlayData)this.partner.getData(ModAttachments.PLAY)).partnerId().equals(this.mob.getUUID())) {
+            this.partner.removeData(ModAttachments.PLAY);
         }
     }
 
@@ -305,10 +309,10 @@ extends Goal {
 
     private Animal findPartner(Optional<SpeciesGrowthSettings> growth) {
         boolean ageGrouped = growth.map(SpeciesGrowthSettings::babyOnlyPlaysWithBabies).orElse(false);
-        UUID ownHerdId = this.mob.hasData(HerdAttachments.HERD_DATA)
-                ? this.mob.getData(HerdAttachments.HERD_DATA).herdId()
+        UUID ownHerdId = this.mob.hasData(ModAttachments.HERD_DATA)
+                ? this.mob.getData(ModAttachments.HERD_DATA).herdId()
                 : null;
-        List<Animal> found = this.mob.level().getEntitiesOfClass(Animal.class, this.mob.getBoundingBox().inflate(12.0), other -> other != this.mob && other.getType() == this.mob.getType() && !other.hasData(SocialAttachments.PLAY) && (Boolean)other.getData(SleepAttachments.RESTING) == false && !other.hasData(HungerAttachments.FOOD_TARGET) && !other.hasData(ThirstAttachments.WATER_TARGET) && SocialCalm.canIdle(other) && (!ageGrouped || other.isBaby() == this.mob.isBaby()));
+        List<Animal> found = this.mob.level().getEntitiesOfClass(Animal.class, this.mob.getBoundingBox().inflate(12.0), other -> other != this.mob && other.getType() == this.mob.getType() && !other.hasData(ModAttachments.PLAY) && (Boolean)other.getData(ModAttachments.RESTING) == false && !other.hasData(ModAttachments.FOOD_TARGET) && !other.hasData(ModAttachments.WATER_TARGET) && SocialCalm.canIdle(other) && (!ageGrouped || other.isBaby() == this.mob.isBaby()));
         if (found.isEmpty()) {
             return null;
         }
@@ -318,8 +322,8 @@ extends Goal {
         if (ownHerdId != null) {
             List<Animal> herdMates = new ArrayList<>();
             for (Animal other : candidates) {
-                if (other.hasData(HerdAttachments.HERD_DATA)
-                        && other.getData(HerdAttachments.HERD_DATA).herdId().equals(ownHerdId)) {
+                if (other.hasData(ModAttachments.HERD_DATA)
+                        && other.getData(ModAttachments.HERD_DATA).herdId().equals(ownHerdId)) {
                     herdMates.add(other);
                 }
             }
@@ -340,23 +344,23 @@ extends Goal {
     private Animal resolvePartner() {
         Animal animal;
         Level level;
-        if (!this.mob.hasData(SocialAttachments.PLAY) || !((level = this.mob.level()) instanceof ServerLevel)) {
+        if (!this.mob.hasData(ModAttachments.PLAY) || !((level = this.mob.level()) instanceof ServerLevel)) {
             return null;
         }
         ServerLevel serverLevel = (ServerLevel)level;
-        Entity entity = serverLevel.getEntity(((PlayData)this.mob.getData(SocialAttachments.PLAY)).partnerId());
-        return entity instanceof Animal && (animal = (Animal)entity).hasData(SocialAttachments.PLAY) ? animal : null;
+        Entity entity = serverLevel.getEntity(((PlayData)this.mob.getData(ModAttachments.PLAY)).partnerId());
+        return entity instanceof Animal && (animal = (Animal)entity).hasData(ModAttachments.PLAY) ? animal : null;
     }
 
     private Optional<Animal> herdAlpha() {
-        if (!this.mob.hasData(HerdAttachments.HERD_DATA)) {
+        if (!this.mob.hasData(ModAttachments.HERD_DATA)) {
             return Optional.empty();
         }
         Level level = this.mob.level();
         if (!(level instanceof ServerLevel serverLevel)) {
             return Optional.empty();
         }
-        HerdData data = this.mob.getData(HerdAttachments.HERD_DATA);
+        HerdData data = this.mob.getData(ModAttachments.HERD_DATA);
         if (data.alpha()) {
             return Optional.of(this.mob);
         }
@@ -374,8 +378,8 @@ extends Goal {
             return PARTNER_RADIUS * HERD_LEASH_MULT;
         }
         int size = 1;
-        if (this.mob.hasData(HerdAttachments.HERD_DATA)) {
-            HerdManager.Herd herd = HerdManager.get(this.mob.getData(HerdAttachments.HERD_DATA).herdId());
+        if (this.mob.hasData(ModAttachments.HERD_DATA)) {
+            HerdManager.Herd herd = HerdManager.get(this.mob.getData(ModAttachments.HERD_DATA).herdId());
             if (herd != null) {
                 size = Math.max(1, herd.members.size());
             }

@@ -1,10 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.client.model.geom.ModelLayerLocation
- *  net.minecraft.resources.ResourceLocation
- */
 package com.charybdis180.ethological.client.sleep;
 
 import net.minecraft.client.model.geom.ModelLayerLocation;

@@ -1,5 +1,6 @@
 package com.charybdis180.ethological.social;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.config.EthologicalConfig;
 import java.util.UUID;
 import net.minecraft.world.entity.animal.Animal;
@@ -7,8 +8,8 @@ import net.minecraft.world.entity.player.Player;
 
 /** Cheap trust helpers. Gains / thresholds come from comfort config. */
 public final class Familiarity {
-    private static final double BASE_ACTIVITY_WAKE = 5.0;
-    private static final double FAMILIAR_ACTIVITY_WAKE = 3.0;
+    private static final double BASE_ACTIVITY_WAKE = 2.0;
+    private static final double FAMILIAR_ACTIVITY_WAKE = 1.5;
     private static final double BASE_CURIOUS_WATCH = 9.0;
     private static final double FAMILIAR_CURIOUS_WATCH = 5.5;
     private static final double BASE_CURIOUS_NOTICE = 20.0;
@@ -21,8 +22,8 @@ public final class Familiarity {
     }
 
     public static FamiliarityData data(Animal animal) {
-        return animal.hasData(SocialAttachments.FAMILIARITY)
-                ? animal.getData(SocialAttachments.FAMILIARITY)
+        return animal.hasData(ModAttachments.FAMILIARITY)
+                ? animal.getData(ModAttachments.FAMILIARITY)
                 : FamiliarityData.DEFAULT;
     }
 
@@ -40,7 +41,7 @@ public final class Familiarity {
 
     public static void handFed(Animal animal, Player player) {
         FamiliarityData next = Familiarity.data(animal).bump(player.getUUID(), handFeedGain(), maxScore());
-        animal.setData(SocialAttachments.FAMILIARITY, next);
+        animal.setData(ModAttachments.FAMILIARITY, next);
     }
 
     public static boolean trusts(Animal animal, Player player) {

@@ -1,24 +1,13 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  net.minecraft.core.BlockPos
- *  net.minecraft.core.Vec3i
- *  net.minecraft.world.entity.Entity
- *  net.minecraft.world.entity.animal.Animal
- *  net.minecraft.world.phys.Vec3
- */
 package com.charybdis180.ethological.social;
 
+import com.charybdis180.ethological.registry.ModAttachments;
 import com.charybdis180.ethological.herd.HerdManager;
 import com.charybdis180.ethological.home.Homes;
 import com.charybdis180.ethological.hunger.Hunger;
 import com.charybdis180.ethological.hunger.HungerSettingsManager;
 import com.charybdis180.ethological.hunger.SpeciesHungerSettings;
-import com.charybdis180.ethological.sleep.SleepAttachments;
 import com.charybdis180.ethological.sleep.SleepSettingsManager;
 import com.charybdis180.ethological.sleep.SpeciesSleepSettings;
-import com.charybdis180.ethological.social.SocialAttachments;
 import com.charybdis180.ethological.thirst.Thirst;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
@@ -57,7 +46,7 @@ public final class SocialCalm {
         }
         Optional<BlockPos> home = Homes.effectiveHome(animal);
         if (home.isPresent()) {
-            double distance = Math.sqrt(animal.distanceToSqr(Vec3.atCenterOf((Vec3i)((Vec3i)home.get()))));
+            double distance = Math.sqrt(animal.distanceToSqr(Vec3.atCenterOf(((Vec3i)home.get()))));
             long lead = Math.min(3000L, 200L + (long)(distance / 0.2));
             if (Homes.ticksUntilSleepStart(dayTime, sleep.sleepStartTick()) <= lead) {
                 return false;
@@ -67,7 +56,7 @@ public final class SocialCalm {
     }
 
     public static boolean stillCalm(Animal animal) {
-        if (((Boolean)animal.getData(SleepAttachments.SLEEPING)).booleanValue() || animal.hasData(SleepAttachments.SLEEP_DISTURBANCE) || animal.hasData(SocialAttachments.STARTLE)) {
+        if (animal.getData(ModAttachments.SLEEPING) || animal.hasData(ModAttachments.SLEEP_DISTURBANCE) || animal.hasData(ModAttachments.STARTLE)) {
             return false;
         }
         if (HerdManager.panicPhaseOf(animal, animal.level().getGameTime()) != HerdManager.PanicPhase.NONE) {
